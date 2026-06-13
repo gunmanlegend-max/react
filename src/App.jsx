@@ -44,10 +44,36 @@ export default function App() {
     isContinuousVoiceRef.current = isContinuousVoice;
   }, [isContinuousVoice]);
 
-  // Load persistent settings and memory on mount
+  // Load persistent settings and memory on mount, falling back to safe compatibility variables
   useEffect(() => {
+    // Read environment variables using an ES2015-compatible fallback configuration
+    let envGroq = '';
+    let envHf = '';
+
+    try {
+      if (typeof process !== 'undefined' && process.env) {
+        envGroq = process.env.VITE_GROQ_API_KEY || '';
+        envHf = process.env.VITE_HF_TOKEN || '';
+      }
+    } catch (e) {
+      console.warn("Unable to access build environment keys safely:", e);
+    }
+
     const savedKeys = localStorage.getItem('gunnarz_keys');
-    if (savedKeys) setKeys(JSON.parse(savedKeys));
+    let finalKeys = { groq: envGroq, hf: envHf };
+    
+    if (savedKeys) {
+      try {
+        const parsed = JSON.parse(savedKeys);
+        finalKeys = {
+          groq: parsed.groq || envGroq,
+          hf: parsed.hf || envHf
+        };
+      } catch (e) {
+        console.error("Failed to parse saved keys, using environment defaults", e);
+      }
+    }
+    setKeys(finalKeys);
     
     const savedChat = localStorage.getItem('gunnarz_chat');
     if (savedChat) setChatHistory(JSON.parse(savedChat));
