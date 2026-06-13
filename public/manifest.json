@@ -4,7 +4,7 @@
   "description": "Futuristic AI dashboard companion.",
   "lang": "en-US",
   "dir": "ltr",
-  "start_url": "/",
+  "start_url": "/https://stirring-croquembouche-0b033f.netlify.app/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#070711",
