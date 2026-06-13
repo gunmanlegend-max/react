@@ -2,28 +2,10 @@
   "background_color": "#ffffff",
   "dir": "ltr",
   "display": "standalone",
-  "name": "Gunnarz Al",
+  "name": "stirring-croquembouche-0b033f.netlify",
   "orientation": "any",
-  "scope": "/https://stirring-croquembouche-0b033f.netlify.app/",
-  "short_name": "Gunman",
-  "start_url": "/https://stirring-croquembouche-0b033f.netlify.app/",
-  "theme_color": "#ffffff",
-  "categories": [
-    "beauty",
-    "books &amp; reference",
-    "developer",
-    "development",
-    "education",
-    "finance",
-    "fundraising",
-    "games",
-    "graphics &amp; design",
-    "multimedia",
-    "networking",
-    "news",
-    "parenting",
-    "productivity",
-    "reference",
-    "travel"
-  ]
+  "scope": "/",
+  "short_name": "stirring-croquembouche-0b033f.netlify",
+  "start_url": "/",
+  "theme_color": "#ffffff"
 }
