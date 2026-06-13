@@ -1,0 +1,17 @@
+{
+  "short_name": "GunnarzAI",
+  "name": "Gunnarz AI OS V30",
+  "description": "Futuristic AI dashboard companion.",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/11865/11865338.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#070711",
+  "theme_color": "#00ffcc",
+  "display": "standalone",
+  "orientation": "portrait"
+}
