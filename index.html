@@ -12,3 +12,8 @@
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
+<script>
+  if (typeof navigator.serviceWorker !== 'undefined') {
+    navigator.serviceWorker.register('sw.js')
+  }
+</script>
