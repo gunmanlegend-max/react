@@ -4,16 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Gunnarz AI OS</title>
+    <meta name="theme-color" content="#070711" />
+    <link rel="manifest" href="/manifest.json" />
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body class="bg-[#070711]">
     <div id="root"></div>
+
     <script type="module" src="/src/main.jsx"></script>
+
+    <script>
+      window.addEventListener('load', () => {
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register('/sw.js');
+        }
+      });
+    </script>
   </body>
 </html>
-<script>
-  if (typeof navigator.serviceWorker !== 'undefined') {
-    navigator.serviceWorker.register('sw.js')
-  }
-</script>
