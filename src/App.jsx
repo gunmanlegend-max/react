@@ -283,12 +283,18 @@ export default function App() {
 
     const targetModel = overrideModel || MODEL_MODES[selectedModel].model;
 
+    // Sanitize messages so that no custom UI properties (like 'attachments') are sent to Groq
+    const sanitizedMessages = messages.map(msg => ({
+      role: msg.role,
+      content: msg.content
+    }));
+
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${keys.groq}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: targetModel,
-        messages: [masterSystemMessage, ...messages],
+        messages: [masterSystemMessage, ...sanitizedMessages],
         max_tokens: 2048,
         temperature: 0.7,
         stream: true
@@ -830,7 +836,7 @@ export default function App() {
               )}
 
               {currentSession?.messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-[#3a3a6a] text-center p-4">
+                <div className="h-full flex flex-col items-center justify-center text-center p-8">
                   <Sparkles size={48} className="text-[#00ffcc] animate-pulse mb-4 opacity-50" />
                   <h3 className="text-lg font-bold text-white mb-2">Sandbox Active - Chat initialized</h3>
                   <p className="text-xs text-[#5d6e8a] max-w-sm">Select a core engine above or input a question to get started. All data is securely isolated locally.</p>
@@ -1025,5 +1031,15 @@ export default function App() {
         )}
       </div>
     </div>
+  );
+}
+
+// Reusable SVG Component
+function RotateCcw(props) {
+  return (
+    <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+      <path d="M3 3v5h5"/>
+    </svg>
   );
 }
