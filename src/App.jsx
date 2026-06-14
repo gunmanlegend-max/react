@@ -13,7 +13,7 @@ const BRAND = "Produced by Gunnarz";
 
 const MODEL_MODES = {
   "gunnarz-singularity": { name: "Singularity Engine", model: "llama-3.3-70b-versatile", color: "#00ffcc" },
-  "vision-pro": { name: "Vision Analytics", model: "llama-3.2-11b-vision-preview", color: "#ff3b30" },
+  "vision-pro": { name: "Vision Analytics", model: "llama-3.2-90b-vision-preview", color: "#ff3b30" },
   "gpt-plus": { name: "ChatGPT Plus (GPT-4o)", model: "llama-3.3-70b-versatile", color: "#10a37f" },
   "gemini-pro": { name: "Gemini Pro 1.5", model: "llama-3.3-70b-versatile", color: "#1a73e8" },
   "claude-max": { name: "Claude 3.5 Sonnet", model: "llama-3.3-70b-versatile", color: "#d97706" },
@@ -44,6 +44,7 @@ export default function App() {
   
   // Attachments (Files & Images)
   const [attachments, setAttachments] = useState([]);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
 
   // Artifact / Canvas View
   const [artifactCode, setArtifactCode] = useState('<h1>Welcome to the Gunnarz Canvas</h1><p>Generate code to see it run here!</p>');
@@ -60,12 +61,16 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(25 * 60);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
 
-  // Voice State
+  // Voice State with VAD
   const [voiceStatus, setVoiceStatus] = useState('idle');
   const [isContinuousVoice, setIsContinuousVoice] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const isContinuousVoiceRef = useRef(false);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const voiceDetectionLoopRef = useRef(null);
+  
   const chatEndRef = useRef(null);
   const [copiedTextId, setCopiedTextId] = useState(null);
 
@@ -128,7 +133,7 @@ export default function App() {
         messages: [
           { 
             role: 'assistant', 
-            content: `Greetings! I am **${APP_FULL}**, an elite, multi-engine intelligence hub.\n\nI was fully conceptualized, programmed, and brought to life exclusively by **Gunnarz**.\n\n### Included Premium Modules:\n* 👁️ **Vision Pro Integration:** Attach images or snap live camera photos for deep visual analytics.\n* 📂 **Smart File Reading:** Upload .txt, .csv, or .json files and I will read and summarize them instantly.\n* 🔴 **Live Camera Streaming:** Activate local vision routing securely.\n* ⚡ **Real-time Text Streaming:** Watch my thoughts compile instantly.\n* 💻 **Manual Canvas Control:** Toggle the Sandbox to build and test code.\n* ⏳ **Focus Dashboard:** Track your productivity in the sidebar.\n* 🗣️ **Continuous Live Voice:** Hands-free verbal learning loops.\n* 🎨 **FLUX Pro Art Canvas:** Generate gorgeous designs.\n* 🔍 **Perplexity Grounding:** Real-time web retrieval.\n\nInsert your **Groq API Key** in the settings tab to unlock instant, unrestricted responses!`
+            content: `Greetings! I am **${APP_FULL}**, an elite, multi-engine intelligence hub.\n\nI was fully conceptualized, programmed, and brought to life exclusively by **Gunnarz**.\n\n### Included Premium Modules:\n* 👁️ **Vision Pro Integration:** Attach images or snap live camera photos for deep visual analytics (upgraded to Groq's high-fidelity **Llama 3.2 90B Vision** model).\n* 📂 **Smart OCR & PDF Extractor:** Drop real PDFs, documents, or screenshots. The app will automatically perform text extraction in the background.\n* 🔴 **Live Camera Streaming:** Activate local vision routing securely.\n* ⚡ **Real-time Text Streaming:** Watch my thoughts compile instantly.\n* 💻 **Manual Canvas Control:** Toggle the Sandbox to build and test code.\n* ⏳ **Focus Dashboard:** Track your productivity in the sidebar.\n* 🗣️ **Conversational VAD Voice:** Voice Mode automatically detects silence when you finish talking to respond dynamically.\n* 🎨 **FLUX Pro Art Canvas:** Generate gorgeous designs.\n* 🔍 **Perplexity Grounding:** Real-time web retrieval.\n\nInsert your **Groq API Key** in the settings tab to unlock instant, unrestricted responses!`
           }
         ]
       };
@@ -188,24 +193,113 @@ export default function App() {
   }, [chatSessions, activeSessionId, isTyping, thinkingSteps, streamedResponse]);
 
   // ==========================================
-  // REAL FILE READING & VISION CAPTURE
+  // REAL OCR (TESSERACT) & PDF TEXT EXTRACTION
   // ==========================================
+  const loadTesseract = () => {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/tesseract.js@v5.1.0/dist/tesseract.min.js';
+      script.onload = () => resolve(window.Tesseract);
+      script.onerror = () => reject(new Error("Could not load Tesseract library."));
+      document.head.appendChild(script);
+    });
+  };
+
+  const loadPdfJS = () => {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js';
+      script.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+        resolve(window.pdfjsLib);
+      };
+      script.onerror = () => reject(new Error("Could not load PDF.js library."));
+      document.head.appendChild(script);
+    });
+  };
+
+  const processOCR = async (imageSrc, fileName) => {
+    setIsProcessingFile(true);
+    try {
+      const Tesseract = await loadTesseract();
+      const result = await Tesseract.recognize(imageSrc, 'eng');
+      const text = result.data.text;
+      
+      setAttachments(prev => [...prev, {
+        type: 'document',
+        name: `OCR_${fileName}.txt`,
+        data: `[OCR Extracted Text from ${fileName}]:\n\n${text}`
+      }]);
+    } catch (err) {
+      console.error("OCR failed", err);
+    } finally {
+      setIsProcessingFile(false);
+    }
+  };
+
+  const processPDF = async (file) => {
+    setIsProcessingFile(true);
+    try {
+      const pdfjsLib = await loadPdfJS();
+      const reader = new FileReader();
+      
+      reader.onload = async (e) => {
+        try {
+          const typedarray = new Uint8Array(e.target.result);
+          const pdf = await pdfjsLib.getDocument({ data: typedarray }).promise;
+          let fullText = "";
+          
+          for (let i = 1; i <= Math.min(pdf.numPages, 10); i++) { // limit to first 10 pages for speed
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            const pageText = content.items.map(item => item.str).join(" ");
+            fullText += `--- Page ${i} ---\n${pageText}\n\n`;
+          }
+
+          setAttachments(prev => [...prev, {
+            type: 'document',
+            name: file.name,
+            data: `[Extracted PDF Content - ${file.name}]:\n\n${fullText}`
+          }]);
+        } catch (err) {
+          alert("Failed to extract PDF text: " + err.message);
+        } finally {
+          setIsProcessingFile(false);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } catch (err) {
+      alert(err.message);
+      setIsProcessingFile(false);
+    }
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Image Upload for Vision
+    // Image Upload (Saves image + automatically schedules real-time OCR extraction)
     if (file.type.startsWith('image/')) {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         setAttachments(prev => [...prev, {
           type: 'image',
           name: file.name,
-          data: event.target.result // Base64
+          data: event.target.result
         }]);
+        // Trigger OCR running in background
+        processOCR(event.target.result, file.name);
       };
       reader.readAsDataURL(file);
-      setSelectedModel('vision-pro'); // Auto-switch to vision model
+      setSelectedModel('vision-pro');
+      return;
+    }
+
+    // PDF Extraction
+    if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+      processPDF(file);
       return;
     }
 
@@ -216,18 +310,18 @@ export default function App() {
         setAttachments(prev => [...prev, {
           type: 'document',
           name: file.name,
-          data: event.target.result // Raw text
+          data: event.target.result
         }]);
       };
       reader.readAsText(file);
       return;
     }
 
-    // Fallback for PDF or unreadable
+    // Fallback
     setAttachments(prev => [...prev, {
       type: 'document-meta',
       name: file.name,
-      data: `[File Metadata]: User uploaded a file named ${file.name} (${(file.size/1024).toFixed(1)} KB). Tell the user you can see the file name, but deep PDF parsing requires text extraction.`
+      data: `[File Metadata]: User uploaded a file named ${file.name} (${(file.size/1024).toFixed(1)} KB).`
     }]);
   };
 
@@ -267,7 +361,8 @@ export default function App() {
       name: 'Camera_Snapshot.jpg',
       data: base64Img
     }]);
-    setSelectedModel('vision-pro'); // Auto-switch to vision model
+    setSelectedModel('vision-pro');
+    processOCR(base64Img, 'Camera_Snapshot.jpg');
   };
 
   // ==========================================
@@ -278,7 +373,7 @@ export default function App() {
 
     const masterSystemMessage = {
       role: 'system',
-      content: `You are Gunnarz AI OS V30 Singularity, an elite premium AI assistant built, programmed, and designed exclusively by Gunnarz. No matter what the user asks, if they inquire about your origin or creator, answer with absolute pride that you were created exclusively by Gunnarz. Format responses beautifully. When providing code (HTML/CSS/JS), place it inside \`\`\`html blocks so the user can send it to the Canvas.`
+      content: `You are Gunnarz AI OS V30 Singularity, an elite premium AI assistant built, programmed, and designed exclusively by Gunnarz. No matter what the user asks, if they inquire about your origin or creator, answer with absolute pride that you were created exclusively by Gunnarz. Format responses beautifully with proper markdown structure. When providing code (HTML/CSS/JS), place it inside \`\`\`html blocks so the user can execute it inside the Canvas.`
     };
 
     const targetModel = overrideModel || MODEL_MODES[selectedModel].model;
@@ -333,10 +428,10 @@ export default function App() {
   };
 
   // ==========================================
-  // CHAT SUBMIT LOGIC (HANDLES FILES & IMAGES)
+  // CHAT SUBMIT LOGIC (PERSISTS TO HISTORY)
   // ==========================================
   const handleChatSubmit = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!chatInput.trim() && attachments.length === 0) return;
     if (isTyping) return;
 
@@ -367,25 +462,21 @@ export default function App() {
     const hasImages = attachments.some(a => a.type === 'image');
     
     if (hasImages) {
-      // Vision Payload
       const contentArray = [{ type: "text", text: userMsgText }];
       
-      // Append text documents to prompt if any
       const textDocs = attachments.filter(a => a.type !== 'image');
       if (textDocs.length > 0) {
         const docString = textDocs.map(d => `\n\n--- Document: ${d.name} ---\n${d.data}\n--- End Document ---`).join('');
         contentArray[0].text += docString;
       }
 
-      // Append images
       attachments.filter(a => a.type === 'image').forEach(img => {
         contentArray.push({ type: "image_url", image_url: { url: img.data } });
       });
       
       newUserMsg = { role: 'user', content: contentArray };
-      if (selectedModel !== 'vision-pro') setSelectedModel('vision-pro'); // Force vision
+      if (selectedModel !== 'vision-pro') setSelectedModel('vision-pro'); // Force vision mode
     } else {
-      // Standard Text Payload
       let finalContent = userMsgText;
       if (attachments.length > 0) {
         const docString = attachments.map(d => `\n\n--- Attached File: ${d.name} ---\n${d.data}\n--- End File ---`).join('');
@@ -396,7 +487,6 @@ export default function App() {
 
     const updatedMessages = [...currentSession.messages, newUserMsg];
     
-    // UI Representation (Strip base64 arrays for clean UI storage)
     const uiUserMsg = { role: 'user', content: userMsgText, attachments: [...attachments] };
     const updatedSessions = chatSessions.map(s => {
       if (s.id === activeSessionId) {
@@ -431,7 +521,7 @@ export default function App() {
 
       const finalizedSessions = chatSessions.map(s => {
         if (s.id === activeSessionId) {
-          return { ...s, messages: [...currentSession.messages, uiUserMsg, { role: 'assistant', content: reply }] };
+          return { ...s, messages: [...s.messages, { role: 'assistant', content: reply }] };
         }
         return s;
       });
@@ -616,7 +706,9 @@ export default function App() {
     setIsTyping(false);
   };
 
-  // Continuous Hands-Free Vocal Translator
+  // ==========================================
+  // REAL-TIME VOICE-TO-VOICE WITH SMART VAD
+  // ==========================================
   const startRecordingSequence = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -624,9 +716,60 @@ export default function App() {
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
+      // Set up Audio Context and Analyser for silence detection (Voice Activity Detection)
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const audioContext = new AudioCtx();
+      audioContextRef.current = audioContext;
+      
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      let silenceStart = Date.now();
+      let hasSpoken = false;
+
+      const checkSilence = () => {
+        if (mediaRecorder.state !== 'recording') return;
+        analyser.getByteFrequencyData(dataArray);
+        
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / bufferLength;
+        const volumeThreshold = 8; // Adjust threshold based on environment
+
+        if (average > volumeThreshold) {
+          hasSpoken = true;
+          silenceStart = Date.now(); // reset silence trigger
+        } else if (hasSpoken) {
+          const silentDuration = Date.now() - silenceStart;
+          if (silentDuration > 1500) { // 1.5 seconds of quiet means user finished talking
+            mediaRecorder.stop();
+            return;
+          }
+        } else {
+          // If the user hasn't spoken at all, but has been silent for too long (e.g. 8 seconds), stop to prevent infinite hanging
+          if (Date.now() - silenceStart > 8000) {
+            mediaRecorder.stop();
+            return;
+          }
+        }
+
+        voiceDetectionLoopRef.current = requestAnimationFrame(checkSilence);
+      };
+
       mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
 
       mediaRecorder.onstop = async () => {
+        cancelAnimationFrame(voiceDetectionLoopRef.current);
+        if (audioContextRef.current) audioContextRef.current.close();
+        
         setVoiceStatus('thinking');
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const formData = new FormData();
@@ -656,6 +799,21 @@ export default function App() {
           const chatData = await response.json();
           const reply = chatData.choices[0].message.content;
 
+          // Append this voice interaction to active chat session history so it persists!
+          const currentSession = getActiveSession();
+          if (currentSession) {
+            const updated = chatSessions.map(s => {
+              if (s.id === activeSessionId) {
+                return {
+                  ...s,
+                  messages: [...s.messages, { role: 'user', content: transcript }, { role: 'assistant', content: reply }]
+                };
+              }
+              return s;
+            });
+            updateSessions(updated);
+          }
+
           setVoiceStatus('speaking');
           const utterance = new SpeechSynthesisUtterance(reply);
           utterance.onend = () => {
@@ -667,7 +825,7 @@ export default function App() {
           utterance.onerror = () => setVoiceStatus('idle');
           window.speechSynthesis.speak(utterance);
         } catch (err) {
-          alert("Audio link failed: " + err.message);
+          alert("Audio translation link failed: " + err.message);
           setVoiceStatus('idle');
         }
         stream.getTracks().forEach(t => t.stop());
@@ -675,6 +833,8 @@ export default function App() {
 
       mediaRecorder.start();
       setVoiceStatus('listening');
+      silenceStart = Date.now();
+      voiceDetectionLoopRef.current = requestAnimationFrame(checkSilence);
     } catch (err) {
       alert("Mic permission denied or failed to load: " + err.message);
       setVoiceStatus('idle');
@@ -948,14 +1108,14 @@ export default function App() {
                 </button>
 
                 {/* UNIVERSAL FILE ATTACHMENT */}
-                <label className="p-3 rounded-xl bg-[#0d0d23] border border-[#1e1b4b]/50 text-gray-400 hover:text-[#00ffcc] cursor-pointer transition-all active:scale-95 shrink-0" title="Attach Files (.txt, .md, .csv) or Images">
-                  <input type="file" accept="image/*,.txt,.csv,.json,.md" onChange={handleFileUpload} className="hidden" />
+                <label className="p-3 rounded-xl bg-[#0d0d23] border border-[#1e1b4b]/50 text-gray-400 hover:text-[#00ffcc] cursor-pointer transition-all active:scale-95 shrink-0" title="Attach Files (.txt, .md, .csv, .pdf) or Images">
+                  <input type="file" accept="image/*,.txt,.csv,.json,.md,.pdf" onChange={handleFileUpload} className="hidden" />
                   <Paperclip size={18} />
                 </label>
 
                 <form onSubmit={selectedModel === 'perplexity-max' ? handlePerplexitySearch : handleChatSubmit} className="flex-1 relative">
-                  <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder={attachments.length > 0 ? "Ask about attached files..." : "Ask Gunnarz Singularity anything..."} className="w-full bg-[#0d0d23] border border-[#1e1b4b]/50 rounded-2xl py-3.5 pl-4 pr-12 text-sm text-white focus:outline-none focus:border-[#00ffcc]/50 transition-all placeholder:text-gray-500" />
-                  <button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-[#00ffcc]/10 text-[#00ffcc] hover:bg-[#00ffcc] hover:text-[#03030b] transition-all"><Send size={16} /></button>
+                  <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder={isProcessingFile ? "Extracting document data..." : attachments.length > 0 ? "Ask about attached files..." : "Ask Gunnarz Singularity anything..."} disabled={isProcessingFile} className="w-full bg-[#0d0d23] border border-[#1e1b4b]/50 rounded-2xl py-3.5 pl-4 pr-12 text-sm text-white focus:outline-none focus:border-[#00ffcc]/50 transition-all placeholder:text-gray-500 disabled:opacity-40" />
+                  <button type="submit" disabled={isProcessingFile} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-[#00ffcc]/10 text-[#00ffcc] hover:bg-[#00ffcc] hover:text-[#03030b] transition-all"><Send size={16} /></button>
                 </form>
 
                 <button onClick={handleImageGeneration} className="p-3 rounded-xl bg-[#0d0d23] border border-[#1e1b4b]/50 text-gray-400 hover:text-[#bf5af2] transition-all active:scale-95 shrink-0" title="Generate Image from text">
@@ -997,17 +1157,17 @@ export default function App() {
         {/* VOICE DRAWER */}
         <div className="p-4 bg-gradient-to-r from-[#070716] via-[#090924] to-[#070716] border-t border-[#1e1b4b]/40 flex flex-col sm:flex-row items-center justify-between gap-4 z-30">
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2"><Volume2 size={16} className="text-[#00ffcc]" /><span className="text-xs font-black uppercase text-gray-400">Continuous Voice Engine</span></div>
+            <div className="flex items-center gap-2"><Volume2 size={16} className="text-[#00ffcc]" /><span className="text-xs font-black uppercase text-gray-400">Continuous Conversational loop</span></div>
             <button onClick={() => setIsContinuousVoice(!isContinuousVoice)} className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors ${isContinuousVoice ? 'bg-[#00ffcc]' : 'bg-[#1e1b4b]'}`}>
               <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${isContinuousVoice ? 'translate-x-5.5' : 'translate-x-1'}`} />
             </button>
           </div>
           <div className="flex items-center gap-4">
             <span className={`text-[10px] px-3 py-1 rounded-full border uppercase font-black tracking-widest ${voiceStatus === 'listening' ? 'bg-[#ff3b30]/15 border-[#ff3b30]/40 text-[#ff3b30] animate-pulse' : voiceStatus === 'thinking' ? 'bg-[#ffcc00]/15 border-[#ffcc00]/40 text-[#ffcc00]' : voiceStatus === 'speaking' ? 'bg-[#00ffcc]/15 border-[#00ffcc]/40 text-[#00ffcc]' : 'bg-[#0a0a24] border-transparent text-gray-400'}`}>
-              {voiceStatus === 'idle' ? 'Vocal Engine: Standby' : voiceStatus === 'listening' ? 'Recording Active...' : voiceStatus === 'thinking' ? 'Scraping Transcript...' : 'Translating Out Loud...'}
+              {voiceStatus === 'idle' ? 'Vocal Engine: Standby' : voiceStatus === 'listening' ? 'Speaking Active...' : voiceStatus === 'thinking' ? 'Scraping Transcript...' : 'Translating Out Loud...'}
             </span>
             <button onClick={handleVoiceToggle} className={`px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-2 ${voiceStatus === 'listening' ? 'bg-[#ff3b30] text-white shadow-[0_0_15px_rgba(255,59,48,0.3)]' : 'bg-gradient-to-r from-[#00ccff] to-[#bf5af2] text-[#03030b] font-black'}`}>
-              <Mic size={14} /><span>{voiceStatus === 'listening' ? 'Stop Listening' : 'Tap Voice Search'}</span>
+              <Mic size={14} /><span>{voiceStatus === 'listening' ? 'Stop Conversing' : 'Tap Voice Sync'}</span>
             </button>
           </div>
         </div>
@@ -1036,5 +1196,15 @@ export default function App() {
         )}
       </div>
     </div>
+  );
+}
+
+// Reusable SVG Component
+function RotateCcw(props) {
+  return (
+    <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+      <path d="M3 3v5h5"/>
+    </svg>
   );
 }
