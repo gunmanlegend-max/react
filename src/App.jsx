@@ -4,7 +4,8 @@ import {
   Loader2, Play, Volume2, ShieldAlert, PanelLeftOpen, PanelLeftClose, 
   Code, Sparkles, BrainCircuit, Trash2, Plus, Edit3, Check, X, 
   FileText, Camera, CameraOff, Timer, Activity, StopCircle, 
-  Copy, CheckCheck, LayoutTemplate, Paperclip, Scan, Maximize, Minimize
+  Copy, CheckCheck, LayoutTemplate, Paperclip, Scan, Maximize, Minimize,
+  RotateCcw
 } from 'lucide-react';
 
 const APP_FULL = "Gunnarz AI OS V30 SINGULARITY";
@@ -829,7 +830,7 @@ export default function App() {
               )}
 
               {currentSession?.messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                <div className="h-full flex flex-col items-center justify-center text-[#3a3a6a] text-center p-4">
                   <Sparkles size={48} className="text-[#00ffcc] animate-pulse mb-4 opacity-50" />
                   <h3 className="text-lg font-bold text-white mb-2">Sandbox Active - Chat initialized</h3>
                   <p className="text-xs text-[#5d6e8a] max-w-sm">Select a core engine above or input a question to get started. All data is securely isolated locally.</p>
@@ -969,7 +970,7 @@ export default function App() {
                 </div>
               </div>
               <div className="flex-1 bg-white">
-                <iframe title="Sandbox execution frame" srcDoc={artifactCode} sandbox="allow-scripts allow-same-origin allow-modals allow-popups" className="w-full h-full border-none bg-slate-50" />
+                <iframe title="Sandbox execution frame" srcDoc={artifactCode} sandbox="allow-scripts allow-modals allow-popups" className="w-full h-full border-none bg-slate-50" />
               </div>
               <div className="p-3 bg-[#0d0d26] border-t border-[#1e1b4b]/40 flex items-center justify-between text-[11px]">
                 <span className="text-[#5d6e8a] font-semibold font-mono">Sandbox: Live Execution Mode</span>
@@ -1024,15 +1025,5 @@ export default function App() {
         )}
       </div>
     </div>
-  );
-}
-
-// Reusable SVG Component
-function RotateCcw(props) {
-  return (
-    <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-      <path d="M3 3v5h5"/>
-    </svg>
   );
 }
