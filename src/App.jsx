@@ -1,13 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Search, MessageSquare, Mic, Image as ImageIcon, Settings, Send,
   Loader2, Play, Volume2, PanelLeftOpen, Trash2, Plus, Edit3, Check, X,
-  FileText, Camera, RotateCcw, MonitorPlay, FileCode2, Star, Sun, Moon, Key,
+  FileText, Camera, CameraOff, RotateCcw, MonitorPlay, FileCode2, Star, Sun, Moon, Key,
   Download, Languages, Copy, CheckCheck, LayoutTemplate, Paperclip, Scan,
-  Maximize, Minimize, Sparkles, BrainCircuit, Activity, CameraOff, StopCircle
+  Maximize, Minimize, Sparkles, BrainCircuit, Activity
 } from 'lucide-react';
 
 const APP_FULL = 'Gunnarz AI OS V30 SINGULARITY';
+const FALLBACK_TEXT_MODEL = 'llama-3.1-8b-instant';
+const DEFAULT_MAX_OUTPUT_TOKENS = 900;
+const SHORT_MAX_OUTPUT_TOKENS = 220;
 
 const MODEL_MODES = {
   'gunnarz-singularity': { name: 'Singularity Engine', model: 'llama-3.3-70b-versatile' },
@@ -33,6 +36,16 @@ const QUICK_ACTIONS = [
   { label: 'Code', prompt: 'Turn this into clean code:\n' },
 ];
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const safeJson = (v) => {
+  try { return JSON.stringify(v); } catch { return String(v); }
+};
+const clampText = (text, max = 6000) => {
+  if (typeof text !== 'string') return text;
+  return text.length > max ? `${text.slice(0, max)}\n\n[Trimmed]` : text;
+};
+const isRateLimitLike = (msg = '') => /rate limit|tpm|too many requests|429|quota|limit reached|request too large/i.test(String(msg));
+
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [chatSessions, setChatSessions] = useState([]);
@@ -42,9 +55,11 @@ export default function App() {
 
   const [selectedModel, setSelectedModel] = useState('gunnarz-singularity');
   const [deepThinking, setDeepThinking] = useState(true);
-  const [thinkingSteps, setThinkingSteps] = useState([]);
   const [isLightMode, setIsLightMode] = useState(false);
   const [fontSize, setFontSize] = useState('text-sm');
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareModels, setCompareModels] = useState(['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']);
 
   const [isIncognito, setIsIncognito] = useState(false);
   const [appLocked, setAppLocked] = useState(false);
@@ -54,8 +69,11 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [streamedResponse, setStreamedResponse] = useState('');
+  const [thinkingSteps, setThinkingSteps] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [starredMessages, setStarredMessages] = useState([]);
+  const [memoryNotes, setMemoryNotes] = useState([]);
+  const [importStatus, setImportStatus] = useState('');
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [editTitleInput, setEditTitleInput] = useState('');
 
@@ -70,6 +88,8 @@ export default function App() {
       code: `<!DOCTYPE html>
 <html>
 <head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   body { font-family: sans-serif; background: #070711; color: #00ffcc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
   h1 { text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 0 10px #00ffcc; }
@@ -83,7 +103,6 @@ export default function App() {
   ]);
   const [activeCanvasTab, setActiveCanvasTab] = useState('tab1');
   const [artifactCode, setArtifactCode] = useState('<h1>Welcome to the Gunnarz Canvas</h1>');
-  const [artifactTitle, setArtifactTitle] = useState('Visual Sandbox');
   const [artifactOpen, setArtifactOpen] = useState(false);
   const [artifactFullscreen, setArtifactFullscreen] = useState(false);
   const [canvasTabMode, setCanvasTabMode] = useState('preview');
@@ -102,19 +121,13 @@ export default function App() {
   const audioChunksRef = useRef([]);
   const isContinuousVoiceRef = useRef(false);
   const audioContextRef = useRef(null);
-  const voiceDetectionLoopRef = useRef(null);
+  const voiceLoopRef = useRef(null);
   const [ttsSpeed, setTtsSpeed] = useState(1.0);
 
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
-  const [memoryNotes, setMemoryNotes] = useState([]);
-  const [compareMode, setCompareMode] = useState(false);
-  const [compareModels, setCompareModels] = useState(['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']);
-  const [importStatus, setImportStatus] = useState('');
-
   const [copiedTextId, setCopiedTextId] = useState(null);
-  const chatEndRef = useRef(null);
-  const dragCounter = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
+  const dragCounter = useRef(0);
+  const chatEndRef = useRef(null);
 
   useEffect(() => { isContinuousVoiceRef.current = isContinuousVoice; }, [isContinuousVoice]);
 
@@ -124,29 +137,6 @@ export default function App() {
     else if (timeLeft === 0) { setIsTimerRunning(false); alert('Focus Session Complete!'); }
     return () => clearInterval(interval);
   }, [isTimerRunning, timeLeft]);
-
-  useEffect(() => {
-    const handlePaste = (e) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.includes('image')) {
-          const file = items[i].getAsFile();
-          if (file) {
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-              setAttachments((prev) => [...prev, { type: 'image', name: 'pasted_image.jpg', data: ev.target.result }]);
-              processOCR(ev.target.result, 'pasted_image.jpg');
-            };
-            reader.readAsDataURL(file);
-            setSelectedModel('vision-pro');
-          }
-        }
-      }
-    };
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, []);
 
   useEffect(() => {
     const savedKeys = localStorage.getItem('gunnarz_premium_keys_v3');
@@ -163,7 +153,7 @@ export default function App() {
         if (parsed.length > 0) setActiveSessionId(parsed[0].id);
       } catch {}
     } else {
-      setupDefaultSession();
+      createDefaultSession();
     }
 
     const savedStars = localStorage.getItem('gunnarz_starred');
@@ -173,103 +163,111 @@ export default function App() {
     if (savedMemory) { try { setMemoryNotes(JSON.parse(savedMemory)); } catch {} }
   }, []);
 
-  const setupDefaultSession = () => {
-    const initialId = `session_${Date.now()}`;
-    const initialSession = {
-      id: initialId,
+  useEffect(() => {
+    const handlePaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.includes('image')) {
+          const file = item.getAsFile();
+          if (!file) continue;
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            setAttachments((prev) => [...prev, { type: 'image', name: 'pasted_image.jpg', data: ev.target.result }]);
+            processOCR(ev.target.result, 'pasted_image.jpg');
+          };
+          reader.readAsDataURL(file);
+          setSelectedModel('vision-pro');
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, []);
+
+  const persistSessions = (sessions) => {
+    setChatSessions(sessions);
+    if (!isIncognito) localStorage.setItem('gunnarz_premium_sessions_v3', JSON.stringify(sessions));
+  };
+
+  const createDefaultSession = () => {
+    const id = `session_${Date.now()}`;
+    const session = {
+      id,
       title: '⚡ Welcome to Singularity',
       messages: [{
         role: 'assistant',
-        content: `Greetings! I am **${APP_FULL}**, an elite intelligence hub exclusively coded by **Gunnarz**.\n\n### Premium Modules Online:\n* 👁️ **Vision Pro:** Live camera or image uploads.\n* 📂 **Document OCR/PDF:** Upload text, PDFs, or images for deep analysis.\n* 💻 **Premium Canvas:** Edit and preview code in real-time.\n* 🗣️ **Smart Voice:** Human-like conversational pausing.\n\n*Plug in your API keys in Settings to begin.*`
+        content: `Greetings! I am **${APP_FULL}**.\n\n### Ready modules\n- Vision uploads\n- OCR / PDFs\n- Canvas / code preview\n- Voice chat\n\nOpen Settings to add your keys.`
       }]
     };
-    setChatSessions([initialSession]);
-    setActiveSessionId(initialId);
-    if (!isIncognito) localStorage.setItem('gunnarz_premium_sessions_v3', JSON.stringify([initialSession]));
-  };
-
-  const updateSessions = (newSessions) => {
-    setChatSessions(newSessions);
-    if (!isIncognito) localStorage.setItem('gunnarz_premium_sessions_v3', JSON.stringify(newSessions));
+    setChatSessions([session]);
+    setActiveSessionId(id);
+    if (!isIncognito) localStorage.setItem('gunnarz_premium_sessions_v3', JSON.stringify([session]));
   };
 
   const getActiveSession = () => chatSessions.find((s) => s.id === activeSessionId) || chatSessions[0];
-
-  const saveKeys = (newKeys) => {
-    setKeys(newKeys);
-    localStorage.setItem('gunnarz_premium_keys_v3', JSON.stringify(newKeys));
-  };
-
-  const saveMemoryNotes = (notes) => {
-    setMemoryNotes(notes);
-    if (!isIncognito) localStorage.setItem('gunnarz_memory_notes_v1', JSON.stringify(notes));
-  };
+  const saveKeys = (next) => { setKeys(next); localStorage.setItem('gunnarz_premium_keys_v3', JSON.stringify(next)); };
+  const saveMemoryNotes = (notes) => { setMemoryNotes(notes); if (!isIncognito) localStorage.setItem('gunnarz_memory_notes_v1', JSON.stringify(notes)); };
 
   const extractMemoryFromMessage = (text) => {
     if (typeof text !== 'string') return null;
     const patterns = [/remember that (.+)/i, /my name is (.+)/i, /i prefer (.+)/i, /save this: (.+)/i, /note that (.+)/i];
-    for (const pattern of patterns) {
-      const match = text.match(pattern);
-      if (match?.[1]) return match[1].trim();
-    }
+    for (const p of patterns) { const m = text.match(p); if (m?.[1]) return m[1].trim(); }
     return null;
   };
 
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
   const exportCurrentSession = () => {
-    const currentSession = getActiveSession();
-    if (!currentSession) return;
-    const payload = {
-      app: APP_FULL,
-      exportedAt: new Date().toISOString(),
-      session: currentSession,
-      memoryNotes,
-      starredMessages,
-      persistentDocs,
-    };
+    const current = getActiveSession();
+    if (!current) return;
+    const payload = { app: APP_FULL, exportedAt: new Date().toISOString(), session: current, memoryNotes, starredMessages, persistentDocs };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${currentSession.title || 'gunnarz-session'}.json`;
-    link.click();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${current.title || 'gunnarz-session'}.json`;
+    a.click();
   };
 
   const importSessionFile = async (file) => {
     try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      if (!data?.session?.id || !Array.isArray(data?.session?.messages)) throw new Error('Invalid session file');
-      const importedId = `session_${Date.now()}`;
-      const importedSession = { ...data.session, id: importedId, title: data.session.title ? `Imported: ${data.session.title}` : 'Imported Session' };
-      updateSessions([importedSession, ...chatSessions]);
-      setActiveSessionId(importedId);
+      const data = JSON.parse(await file.text());
+      if (!data?.session?.messages) throw new Error('Invalid session file');
+      const id = `session_${Date.now()}`;
+      const session = { ...data.session, id, title: data.session.title ? `Imported: ${data.session.title}` : 'Imported Session' };
+      persistSessions([session, ...chatSessions]);
+      setActiveSessionId(id);
       if (Array.isArray(data.memoryNotes)) saveMemoryNotes(data.memoryNotes);
       if (Array.isArray(data.starredMessages)) setStarredMessages(data.starredMessages);
       if (Array.isArray(data.persistentDocs)) setPersistentDocs(data.persistentDocs);
-      setImportStatus('Session imported successfully.');
+      setImportStatus('Imported successfully.');
     } catch (err) {
       setImportStatus(`Import failed: ${err.message}`);
     }
   };
 
   const handleNewSession = () => {
-    const newId = `session_${Date.now()}`;
-    const newSession = { id: newId, title: `Session ${chatSessions.length + 1}`, messages: [] };
-    const nextSessions = [newSession, ...chatSessions];
-    updateSessions(nextSessions);
-    setActiveSessionId(newId);
+    const id = `session_${Date.now()}`;
+    const session = { id, title: `Session ${chatSessions.length + 1}`, messages: [] };
+    persistSessions([session, ...chatSessions]);
+    setActiveSessionId(id);
   };
 
   const handleDeleteSession = (id, e) => {
     e.stopPropagation();
-    const filtered = chatSessions.filter((s) => s.id !== id);
-    if (filtered.length === 0) {
+    const remaining = chatSessions.filter((s) => s.id !== id);
+    if (remaining.length === 0) {
       const resetId = `session_${Date.now()}`;
-      updateSessions([{ id: resetId, title: 'New Session', messages: [] }]);
+      persistSessions([{ id: resetId, title: 'New Session', messages: [] }]);
       setActiveSessionId(resetId);
-    } else {
-      updateSessions(filtered);
-      if (activeSessionId === id) setActiveSessionId(filtered[0].id);
+      return;
     }
+    persistSessions(remaining);
+    if (activeSessionId === id) setActiveSessionId(remaining[0].id);
   };
 
   const startEditTitle = (session, e) => {
@@ -279,32 +277,32 @@ export default function App() {
   };
 
   const saveSessionTitle = (id) => {
-    const updated = chatSessions.map((s) => (s.id === id ? { ...s, title: editTitleInput.trim() || s.title } : s));
-    updateSessions(updated);
+    const next = chatSessions.map((s) => s.id === id ? { ...s, title: editTitleInput.trim() || s.title } : s);
+    persistSessions(next);
     setEditingSessionId(null);
   };
 
   const handleDragOver = (e) => e.preventDefault();
-  const handleDragEnter = (e) => { e.preventDefault(); dragCounter.current += 1; if (e.dataTransfer.items && e.dataTransfer.items.length > 0) setIsDragging(true); };
-  const handleDragLeave = (e) => { e.preventDefault(); dragCounter.current -= 1; if (dragCounter.current === 0) setIsDragging(false); };
+  const handleDragEnter = (e) => { e.preventDefault(); dragCounter.current += 1; if (e.dataTransfer.items?.length) setIsDragging(true); };
+  const handleDragLeave = (e) => { e.preventDefault(); dragCounter.current -= 1; if (dragCounter.current <= 0) setIsDragging(false); };
   const handleDrop = async (e) => { e.preventDefault(); setIsDragging(false); dragCounter.current = 0; const file = e.dataTransfer.files[0]; if (file) await processUploadedFile(file); };
 
   const processOCR = async (imageSrc, fileName) => {
     setIsProcessingFile(true);
     try {
       if (!window.Tesseract) {
-        await new Promise((res, rej) => {
-          const script = document.createElement('script');
-          script.src = 'https://unpkg.com/tesseract.js@v5.1.0/dist/tesseract.min.js';
-          script.onload = res;
-          script.onerror = rej;
-          document.head.appendChild(script);
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://unpkg.com/tesseract.js@v5.1.0/dist/tesseract.min.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
         });
       }
       const result = await window.Tesseract.recognize(imageSrc, 'eng');
-      const docPayload = { type: 'document', name: `OCR_${fileName}.txt`, data: `[Extracted Text]:\n${result.data.text}` };
-      setAttachments((prev) => [...prev, docPayload]);
-      setPersistentDocs((prev) => [...prev, docPayload]);
+      const doc = { type: 'document', name: `OCR_${fileName}.txt`, data: `[Extracted Text]\n${result.data.text}` };
+      setAttachments((prev) => [...prev, doc]);
+      setPersistentDocs((prev) => [...prev, doc]);
     } catch (err) {
       console.error(err);
     } finally {
@@ -316,28 +314,28 @@ export default function App() {
     setIsProcessingFile(true);
     try {
       if (!window.pdfjsLib) {
-        await new Promise((res, rej) => {
-          const script = document.createElement('script');
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js';
-          script.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js'; res(); };
-          script.onerror = rej;
-          document.head.appendChild(script);
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js';
+          s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js'; resolve(); };
+          s.onerror = reject;
+          document.head.appendChild(s);
         });
       }
       const reader = new FileReader();
-      reader.onload = async (e) => {
+      reader.onload = async (ev) => {
         try {
-          const typedarray = new Uint8Array(e.target.result);
-          const pdf = await window.pdfjsLib.getDocument({ data: typedarray }).promise;
+          const typed = new Uint8Array(ev.target.result);
+          const pdf = await window.pdfjsLib.getDocument({ data: typed }).promise;
           let fullText = '';
-          for (let i = 1; i <= Math.min(pdf.numPages, 15); i++) {
+          for (let i = 1; i <= Math.min(pdf.numPages, 10); i++) {
             const page = await pdf.getPage(i);
             const content = await page.getTextContent();
-            fullText += `--- Page ${i} ---\n${content.items.map((item) => item.str).join(' ')}\n\n`;
+            fullText += `--- Page ${i} ---\n${content.items.map((it) => it.str).join(' ')}\n\n`;
           }
-          const docPayload = { type: 'document', name: file.name, data: `[PDF Content]:\n${fullText}` };
-          setAttachments((prev) => [...prev, docPayload]);
-          setPersistentDocs((prev) => [...prev, docPayload]);
+          const doc = { type: 'document', name: file.name, data: `[PDF Content]\n${fullText}` };
+          setAttachments((prev) => [...prev, doc]);
+          setPersistentDocs((prev) => [...prev, doc]);
         } catch (err) {
           alert(`PDF Error: ${err.message}`);
         } finally {
@@ -352,6 +350,7 @@ export default function App() {
   };
 
   const processUploadedFile = async (file) => {
+    const name = file.name?.toLowerCase() || '';
     if (file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onload = (ev) => {
@@ -362,9 +361,9 @@ export default function App() {
       setSelectedModel('vision-pro');
       return;
     }
-    if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) return processPDF(file);
+    if (file.type === 'application/pdf' || name.endsWith('.pdf')) return processPDF(file);
 
-    if (file.type.startsWith('audio/') || file.name.endsWith('.mp3') || file.name.endsWith('.wav')) {
+    if (file.type.startsWith('audio/') || name.endsWith('.mp3') || name.endsWith('.wav')) {
       setIsProcessingFile(true);
       try {
         const formData = new FormData();
@@ -376,7 +375,7 @@ export default function App() {
           body: formData,
         });
         const d = await res.json();
-        if (d.text) setAttachments((prev) => [...prev, { type: 'document', name: `Audio_${file.name}.txt`, data: `[Audio Transcript]:\n${d.text}` }]);
+        if (d.text) setAttachments((prev) => [...prev, { type: 'document', name: `Audio_${file.name}.txt`, data: `[Audio Transcript]\n${d.text}` }]);
       } catch {
         alert('Audio transcription failed.');
       } finally {
@@ -387,9 +386,9 @@ export default function App() {
 
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const docPayload = { type: 'document', name: file.name, data: ev.target.result };
-      setAttachments((prev) => [...prev, docPayload]);
-      setPersistentDocs((prev) => [...prev, docPayload]);
+      const doc = { type: 'document', name: file.name, data: ev.target.result };
+      setAttachments((prev) => [...prev, doc]);
+      setPersistentDocs((prev) => [...prev, doc]);
     };
     reader.readAsText(file);
   };
@@ -404,17 +403,17 @@ export default function App() {
   const toggleCamera = async () => {
     if (isCameraActive) {
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
-      setIsCameraActive(false);
       streamRef.current = null;
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        streamRef.current = stream;
-        setIsCameraActive(true);
-        setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = stream; }, 100);
-      } catch {
-        alert('Camera access denied.');
-      }
+      setIsCameraActive(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      streamRef.current = stream;
+      setIsCameraActive(true);
+      setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = stream; }, 100);
+    } catch {
+      alert('Camera access denied.');
     }
   };
 
@@ -430,12 +429,12 @@ export default function App() {
     processOCR(b64, 'Snapshot.jpg');
   };
 
-  const handleGroqCallStream = async (messages, onChunk, overrideModel) => {
-    if (!keys.groq && selectedModel !== 'open-router') throw new Error('Missing Groq API Key.');
-
-    let targetModel = overrideModel || MODEL_MODES[selectedModel].model;
+  const handleGroqCallStream = async (messages, onChunk, overrideModel, options = {}) => {
+    const { maxTokens = DEFAULT_MAX_OUTPUT_TOKENS, temperature = 0.7, allowFallback = true, messageCharLimit = 6000 } = options;
+    const modelName = overrideModel || MODEL_MODES[selectedModel]?.model || FALLBACK_TEXT_MODEL;
     let url = 'https://api.groq.com/openai/v1/chat/completions';
     let headers = { Authorization: `Bearer ${keys.groq}`, 'Content-Type': 'application/json' };
+    let finalModel = modelName;
 
     if (selectedModel === 'open-router') {
       if (!keys.openrouter) throw new Error('Missing OpenRouter Key.');
@@ -446,83 +445,100 @@ export default function App() {
         'HTTP-Referer': 'https://gunnarz-ai.netlify.app',
         'X-Title': 'Gunnarz AI OS',
       };
-      targetModel = customORModel;
+      finalModel = customORModel;
     }
 
     const systemMsg = {
       role: 'system',
-      content: `You are Gunnarz AI OS V30 Singularity. Format beautifully with markdown. Put executable HTML/CSS/JS code inside \`\`\`html code blocks so users can immediately run it.`
+      content: 'You are Gunnarz AI OS V30 Singularity. Be clear, compact, and helpful. Use markdown. Keep responses smaller unless the user asks for depth.'
     };
 
-    const safeMsgs = messages.map((m) => ({ role: m.role, content: m.content }));
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ model: targetModel, messages: [systemMsg, ...safeMsgs], max_tokens: 3000, temperature: 0.7, stream: true }),
-    });
+    const safeMsgs = messages.map((m) => ({
+      role: m.role,
+      content: typeof m.content === 'string' ? clampText(m.content, messageCharLimit) : clampText(safeJson(m.content), messageCharLimit),
+    }));
 
-    if (!response.ok) throw new Error((await response.json()).error?.message || 'Completions Connection Error');
+    const streamOnce = async (modelToUse, endpoint, endpointHeaders) => {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: endpointHeaders,
+        body: JSON.stringify({ model: modelToUse, messages: [systemMsg, ...safeMsgs], max_tokens: maxTokens, temperature, stream: true }),
+      });
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    let fullContent = '';
+      if (!res.ok) {
+        let errText = '';
+        try {
+          const errJson = await res.json();
+          errText = errJson?.error?.message || errJson?.message || '';
+        } catch {
+          try { errText = await res.text(); } catch {}
+        }
+        const err = new Error(errText || `Request failed with status ${res.status}`);
+        err.status = res.status;
+        throw err;
+      }
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunks = decoder.decode(value, { stream: true }).split('\n');
-      for (const chunk of chunks) {
-        if (chunk.trim().startsWith('data: ') && chunk.trim() !== 'data: [DONE]') {
-          try {
-            const data = JSON.parse(chunk.replace(/^data: /, ''));
-            if (data.choices?.[0]?.delta?.content) {
-              fullContent += data.choices[0].delta.content;
-              onChunk(fullContent);
-            }
-          } catch {}
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let full = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunks = decoder.decode(value, { stream: true }).split('\n');
+        for (const chunk of chunks) {
+          if (chunk.trim().startsWith('data: ') && chunk.trim() !== 'data: [DONE]') {
+            try {
+              const data = JSON.parse(chunk.replace(/^data: /, ''));
+              const delta = data?.choices?.[0]?.delta?.content;
+              if (delta) {
+                full += delta;
+                onChunk(full);
+              }
+            } catch {}
+          }
         }
       }
-    }
-    return fullContent;
-  };
+      return full;
+    };
 
-  const compareModelReplies = async (messages) => {
-    const results = [];
-    for (const model of compareModels) {
-      try {
-        const reply = await handleGroqCallStream(messages, () => {}, model);
-        results.push({ model, reply });
-      } catch (e) {
-        results.push({ model, reply: `Error: ${e.message}` });
+    try {
+      return await streamOnce(finalModel, url, headers);
+    } catch (err) {
+      if (allowFallback && selectedModel !== 'open-router' && isRateLimitLike(err.message)) {
+        await sleep(1200);
+        return streamOnce(FALLBACK_TEXT_MODEL, 'https://api.groq.com/openai/v1/chat/completions', {
+          Authorization: `Bearer ${keys.groq}`,
+          'Content-Type': 'application/json',
+        });
       }
+      throw err;
     }
-    return results;
   };
 
   const compressContextIfNecessary = async (messages) => {
-    if (messages.length > 10 && keys.groq) {
-      const compressCount = Math.floor(messages.length / 2);
-      const toCompress = messages.slice(0, compressCount);
-      const remainder = messages.slice(compressCount);
-      setThinkingSteps((prev) => [...prev, 'Auto-summarizing old message frames to preserve context window tokens...']);
-      const summarySystem = [
-        { role: 'system', content: 'Summarize the critical facts, parameters, and details of this discussion inside 3 dense sentences.' },
-        ...toCompress.map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) })),
-      ];
-      try {
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${keys.groq}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages: summarySystem }),
-        });
-        const data = await res.json();
-        const compressedSummary = data.choices[0].message.content;
-        return [{ role: 'system', content: `Historical Session Summary (Retained context): ${compressedSummary}` }, ...remainder];
-      } catch {
-        return messages;
-      }
+    if (messages.length <= 8 || !keys.groq) return messages;
+    const keep = 4;
+    const toCompress = messages.slice(0, messages.length - keep);
+    const remainder = messages.slice(messages.length - keep);
+
+    const summaryPrompt = [
+      { role: 'system', content: 'Summarize the critical facts, constraints, and code state in 3 dense sentences.' },
+      ...toCompress.map((m) => ({ role: m.role, content: typeof m.content === 'string' ? clampText(m.content, 1500) : clampText(safeJson(m.content), 1500) }))
+    ];
+
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${keys.groq}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: FALLBACK_TEXT_MODEL, messages: summaryPrompt, max_tokens: SHORT_MAX_OUTPUT_TOKENS, temperature: 0.2 }),
+      });
+      const data = await res.json();
+      const summary = data?.choices?.[0]?.message?.content || '';
+      if (!summary) return messages;
+      return [{ role: 'system', content: `Historical Session Summary: ${summary}` }, ...remainder];
+    } catch {
+      return messages;
     }
-    return messages;
   };
 
   const generateSilentSessionTitle = async (sessionId, firstMessageText) => {
@@ -532,94 +548,110 @@ export default function App() {
         method: 'POST',
         headers: { Authorization: `Bearer ${keys.groq}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'llama-3.1-8b-instant',
+          model: FALLBACK_TEXT_MODEL,
           messages: [
-            { role: 'system', content: 'Create a ultra-short 2 to 3 word title for this prompt. Return ONLY the title with no quotes or extra text.' },
-            { role: 'user', content: firstMessageText },
+            { role: 'system', content: 'Create a 2 to 3 word title. Return ONLY the title.' },
+            { role: 'user', content: clampText(firstMessageText, 1000) }
           ],
-        }),
+          max_tokens: SHORT_MAX_OUTPUT_TOKENS,
+          temperature: 0.2,
+        })
       });
       const data = await res.json();
-      const generatedTitle = data.choices[0].message.content;
-      if (generatedTitle?.trim()) setChatSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title: generatedTitle.trim() } : s)));
-    } catch {
-      console.warn('Silent title generation bypassed.');
+      const title = data?.choices?.[0]?.message?.content?.trim();
+      if (title) setChatSessions((prev) => prev.map((s) => s.id === sessionId ? { ...s, title } : s));
+    } catch {}
+  };
+
+  const runWebSearch = async (query) => {
+    if (!webSearchEnabled) return '';
+    return `Live web search placeholder for: ${query}`;
+  };
+
+  const compareModelReplies = async (messages) => {
+    const results = [];
+    for (const model of compareModels) {
+      try {
+        const reply = await handleGroqCallStream(messages, () => {}, model, { maxTokens: SHORT_MAX_OUTPUT_TOKENS, temperature: 0.4, allowFallback: true, messageCharLimit: 4000 });
+        results.push({ model, reply });
+      } catch (e) {
+        results.push({ model, reply: `Error: ${e.message}` });
+      }
     }
+    return results;
   };
 
   const handleChatSubmit = async (e, textOverride = '') => {
     if (e) e.preventDefault();
-    const activeText = textOverride || chatInput;
-    if ((!activeText.trim() && attachments.length === 0) || isTyping) return;
+    const text = textOverride || chatInput;
+    if ((!text.trim() && attachments.length === 0) || isTyping) return;
 
     const currentSession = getActiveSession();
     if (!currentSession) return;
 
-    const memoryHit = extractMemoryFromMessage(activeText);
+    const memoryHit = extractMemoryFromMessage(text);
     if (memoryHit) {
       saveMemoryNotes([{ id: Date.now(), note: memoryHit, savedAt: new Date().toISOString() }, ...memoryNotes]);
     }
 
-    const wantsCode = /code|canvas|app|website|html/i.test(activeText);
-    if (wantsCode && !artifactOpen) setArtifactTitle('Preparing Sandbox...');
-
     setChatInput('');
     setIsTyping(true);
     setStreamedResponse('');
-
     if (deepThinking) {
-      setThinkingSteps(['Analyzing syntax...', 'Injecting Gunnarz Directives...', 'Formulating secure sandbox logic...']);
-      await new Promise((r) => setTimeout(r, 900));
+      setThinkingSteps(['Analyzing prompt...', 'Preparing context...', 'Composing response...']);
+      await sleep(500);
     }
 
-    let payloadContent = activeText;
+    let payloadContent = text;
     const hasImages = attachments.some((a) => a.type === 'image');
 
     if (hasImages) {
-      payloadContent = [{ type: 'text', text: activeText }];
+      payloadContent = [{ type: 'text', text }];
       const texts = attachments.filter((a) => a.type !== 'image');
-      if (texts.length) payloadContent[0].text += texts.map((d) => `\n[${d.name}]:\n${d.data}`).join('');
+      if (texts.length) payloadContent[0].text += texts.map((d) => `\n[${d.name}]\n${clampText(d.data, 1500)}`).join('');
       attachments.filter((a) => a.type === 'image').forEach((img) => payloadContent.push({ type: 'image_url', image_url: { url: img.data } }));
     } else if (attachments.length || persistentDocs.length) {
-      const combinedDocs = [...attachments, ...persistentDocs];
-      payloadContent += combinedDocs.map((d) => `\n\n--- [${d.name}] ---\n${d.data}`).join('');
+      const docs = [...attachments, ...persistentDocs].slice(0, 3);
+      payloadContent += docs.map((d) => `\n\n--- [${d.name}] ---\n${clampText(d.data, 1500)}`).join('');
     }
 
-    if (webSearchEnabled) {
-      payloadContent += `\n\n[Web Search Enabled] User requested current context if needed.`;
-    }
+    const webContext = await runWebSearch(text);
+    if (webContext) payloadContent += `\n\n[Web Context]\n${webContext}`;
 
     const payloadMsg = { role: 'user', content: payloadContent };
-    const uiMsg = { role: 'user', content: activeText, attachments: [...attachments] };
-    const isFirstMessage = currentSession.messages.length === 0;
+    const uiMsg = { role: 'user', content: text, attachments: [...attachments] };
     const updatedMessages = [...currentSession.messages, payloadMsg];
-    const compressedMsgs = await compressContextIfNecessary(updatedMessages);
+    const compressed = await compressContextIfNecessary(updatedMessages);
 
-    updateSessions(chatSessions.map((s) => (s.id === activeSessionId ? { ...s, messages: [...s.messages, uiMsg] } : s)));
-    setThinkingSteps([]);
+    persistSessions(chatSessions.map((s) => s.id === activeSessionId ? { ...s, messages: [...s.messages, uiMsg] } : s));
     setAttachments([]);
+    setThinkingSteps([]);
 
     try {
       if (compareMode) {
-        const replies = await compareModelReplies(compressedMsgs);
-        const comparisonText = replies.map((r) => `### ${r.model}\n${r.reply}`).join('\n\n');
-        updateSessions(chatSessions.map((s) => (s.id === activeSessionId ? { ...s, messages: [...s.messages, { role: 'assistant', content: comparisonText }] } : s)));
+        const replies = await compareModelReplies(compressed);
+        const content = replies.map((r) => `### ${r.model}\n${r.reply}`).join('\n\n');
+        persistSessions(chatSessions.map((s) => s.id === activeSessionId ? { ...s, messages: [...s.messages, { role: 'assistant', content }] } : s));
       } else {
-        const reply = await handleGroqCallStream(compressedMsgs, setStreamedResponse, hasImages ? MODEL_MODES['vision-pro'].model : null);
+        const reply = await handleGroqCallStream(compressed, setStreamedResponse, hasImages ? MODEL_MODES['vision-pro'].model : null, {
+          maxTokens: hasImages ? SHORT_MAX_OUTPUT_TOKENS : DEFAULT_MAX_OUTPUT_TOKENS,
+          temperature: 0.7,
+          allowFallback: true,
+          messageCharLimit: hasImages ? 3000 : 6000,
+        });
+
         const htmlMatch = reply.match(/```html\s*([\s\S]*?)\s*```/);
         if (htmlMatch?.[1]) {
-          const tabId = `tab_${Date.now()}`;
-          const tabName = `Module_${canvasTabs.length + 1}.html`;
+          const newId = `tab_${Date.now()}`;
           const code = htmlMatch[1];
-          setCanvasTabs((prev) => [...prev, { id: tabId, name: tabName, code }]);
-          setActiveCanvasTab(tabId);
+          setCanvasTabs((prev) => [...prev, { id: newId, name: `Module_${prev.length + 1}.html`, code }]);
+          setActiveCanvasTab(newId);
           setArtifactCode(code);
-          setArtifactTitle('Generated Sandbox');
           setArtifactOpen(true);
         }
-        const nextSessions = chatSessions.map((s) => (s.id === activeSessionId ? { ...s, messages: [...s.messages, { role: 'assistant', content: reply }] } : s));
-        updateSessions(nextSessions);
-        if (isFirstMessage) generateSilentSessionTitle(activeSessionId, activeText);
+
+        persistSessions(chatSessions.map((s) => s.id === activeSessionId ? { ...s, messages: [...s.messages, { role: 'assistant', content: reply }] } : s));
+        if (currentSession.messages.length === 0) generateSilentSessionTitle(activeSessionId, text);
       }
     } catch (err) {
       alert(err.message);
@@ -637,24 +669,23 @@ export default function App() {
     const prompt = chatInput;
     setChatInput('');
     setIsTyping(true);
-    if (deepThinking) {
-      setThinkingSteps(['Accessing FLUX.1...', 'Generating high-def latent vectors...']);
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-
+    setThinkingSteps(['Accessing image model...', 'Generating image...']);
     try {
       const res = await fetch('https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell', {
-        headers: { Authorization: `Bearer ${keys.hf}` },
         method: 'POST',
+        headers: { Authorization: `Bearer ${keys.hf}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ inputs: prompt }),
       });
-      if (!res.ok) throw new Error('Image gen failed. Check HF Token.');
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(t ? `Image gen failed: ${t}` : 'Image gen failed. This endpoint may be blocked by CORS/network restrictions.');
+      }
       const imgUrl = URL.createObjectURL(await res.blob());
       const uiMsg = { role: 'user', content: `🎨 Draw: "${prompt}"` };
       const asMsg = { role: 'assistant', content: `![Generated Art](${imgUrl})` };
-      updateSessions(chatSessions.map((s) => (s.id === activeSessionId ? { ...s, messages: [...s.messages, uiMsg, asMsg] } : s)));
+      persistSessions(chatSessions.map((s) => s.id === activeSessionId ? { ...s, messages: [...s.messages, uiMsg, asMsg] } : s));
     } catch (err) {
-      alert(err.message);
+      setStreamedResponse(`⚠️ Image generation error: ${err.message}`);
     }
     setThinkingSteps([]);
     setIsTyping(false);
@@ -684,14 +715,14 @@ export default function App() {
         analyser.getByteFrequencyData(dataArray);
         const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
         if (avg > 10) { hasSpoken = true; silenceStart = Date.now(); }
-        else if (hasSpoken && Date.now() - silenceStart > 1800) { mediaRecorder.stop(); return; }
+        else if (hasSpoken && Date.now() - silenceStart > 1600) { mediaRecorder.stop(); return; }
         else if (!hasSpoken && Date.now() - silenceStart > 10000) { mediaRecorder.stop(); return; }
-        voiceDetectionLoopRef.current = requestAnimationFrame(checkSilence);
+        voiceLoopRef.current = requestAnimationFrame(checkSilence);
       };
 
       mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mediaRecorder.onstop = async () => {
-        cancelAnimationFrame(voiceDetectionLoopRef.current);
+        cancelAnimationFrame(voiceLoopRef.current);
         if (audioContextRef.current) audioContextRef.current.close();
         setVoiceStatus('thinking');
         try {
@@ -706,14 +737,14 @@ export default function App() {
           const tData = await tRes.json();
           if (!tData.text?.trim()) throw new Error('Empty audio.');
 
-          const sysMsg = { role: 'system', content: 'You are Gunnarz AI OS. Speak naturally, very briefly (1-2 sentences). Coded by Gunnarz.' };
+          const sysMsg = { role: 'system', content: 'You are Gunnarz AI OS. Speak naturally, very briefly (1-2 sentences).' };
           const cRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: { Authorization: `Bearer ${keys.groq}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [sysMsg, { role: 'user', content: tData.text }], max_tokens: 250, temperature: 0.7 }),
+            body: JSON.stringify({ model: FALLBACK_TEXT_MODEL, messages: [sysMsg, { role: 'user', content: tData.text }], max_tokens: 180, temperature: 0.4 }),
           });
-          const reply = (await cRes.json()).choices[0].message.content;
-          updateSessions(chatSessions.map((s) => (s.id === activeSessionId ? { ...s, messages: [...s.messages, { role: 'user', content: tData.text }, { role: 'assistant', content: reply }] } : s)));
+          const reply = (await cRes.json()).choices?.[0]?.message?.content || '';
+          persistSessions(chatSessions.map((s) => s.id === activeSessionId ? { ...s, messages: [...s.messages, { role: 'user', content: tData.text }, { role: 'assistant', content: reply }] } : s));
 
           setVoiceStatus('speaking');
           const utterance = new SpeechSynthesisUtterance(reply);
@@ -748,25 +779,24 @@ export default function App() {
   };
 
   const playMessageAloud = (text) => {
-    const utterance = new SpeechSynthesisUtterance(typeof text === 'string' ? text : JSON.stringify(text));
-    utterance.rate = ttsSpeed;
     window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(typeof text === 'string' ? text : safeJson(text));
+    utterance.rate = ttsSpeed;
     window.speechSynthesis.speak(utterance);
   };
 
   const summarizeCurrentChatSession = async () => {
-    const currentSession = getActiveSession();
-    if (!currentSession || currentSession.messages.length === 0) return;
+    const current = getActiveSession();
+    if (!current || current.messages.length === 0) return;
     setIsTyping(true);
-    setThinkingSteps(['Condensing complete discussion frame...']);
-    const summaryPrompt = [
-      { role: 'system', content: 'Generate a premium, dense bulleted recap summarizing the key decisions, solutions, and code frameworks discussed in this chat session.' },
-      ...currentSession.messages.map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) })),
-    ];
+    setThinkingSteps(['Condensing session...']);
     try {
-      const reply = await handleGroqCallStream(summaryPrompt, setStreamedResponse, 'llama-3.1-8b-instant');
-      const asMsg = { role: 'assistant', content: `📝 **Chat Summary Recap:**\n\n${reply}` };
-      updateSessions(chatSessions.map((s) => (s.id === activeSessionId ? { ...s, messages: [...s.messages, asMsg] } : s)));
+      const summaryPrompt = [
+        { role: 'system', content: 'Generate a premium, dense bulleted recap summarizing the key decisions, solutions, and code frameworks discussed in this chat session.' },
+        ...current.messages.map((m) => ({ role: m.role, content: typeof m.content === 'string' ? clampText(m.content, 1200) : clampText(safeJson(m.content), 1200) }))
+      ];
+      const reply = await handleGroqCallStream(summaryPrompt, setStreamedResponse, FALLBACK_TEXT_MODEL, { maxTokens: SHORT_MAX_OUTPUT_TOKENS, temperature: 0.2, allowFallback: true, messageCharLimit: 3000 });
+      persistSessions(chatSessions.map((s) => s.id === activeSessionId ? { ...s, messages: [...s.messages, { role: 'assistant', content: `📝 **Chat Summary Recap:**\n\n${reply}` }] } : s));
     } catch {
       alert('Recap compaction failed.');
     } finally {
@@ -777,8 +807,9 @@ export default function App() {
   };
 
   const toggleStarMessage = (content) => {
-    const isStarred = starredMessages.includes(content);
-    const updated = isStarred ? starredMessages.filter((m) => m !== content) : [...starredMessages, content];
+    const updated = starredMessages.includes(content)
+      ? starredMessages.filter((m) => m !== content)
+      : [...starredMessages, content];
     setStarredMessages(updated);
     localStorage.setItem('gunnarz_starred', JSON.stringify(updated));
   };
@@ -786,11 +817,11 @@ export default function App() {
   const loadPyodideEngine = () => {
     if (window.loadPyodide) return Promise.resolve(window.loadPyodide);
     return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js';
-      script.onload = () => resolve(window.loadPyodide);
-      script.onerror = () => reject(new Error('Failed to load Pyodide Python compilation WASM module.'));
-      document.head.appendChild(script);
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js';
+      s.onload = () => resolve(window.loadPyodide);
+      s.onerror = () => reject(new Error('Failed to load Pyodide.'));
+      document.head.appendChild(s);
     });
   };
 
@@ -826,20 +857,22 @@ export default function App() {
       setAppLocked(false);
       setPinInput('');
       alert('PIN Security Saved.');
-    } else alert('Pin must be 4 digits.');
+    } else {
+      alert('Pin must be 4 digits.');
+    }
   };
 
   const handleTabCodeChange = (codeText) => {
-    setCanvasTabs((prev) => prev.map((t) => (t.id === activeCanvasTab ? { ...t, code: codeText } : t)));
+    setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, code: codeText } : t));
     setArtifactCode(codeText);
   };
 
   const downloadSandboxCode = () => {
     const blob = new Blob([artifactCode], { type: 'text/html' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'gunnarz_workspace_project.html';
-    link.click();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'gunnarz_workspace_project.html';
+    a.click();
   };
 
   const toggleIncognitoMode = () => {
@@ -867,7 +900,7 @@ export default function App() {
     }
 
     if (typeof content === 'object') {
-      return <pre className="text-xs text-red-400 overflow-auto bg-black p-2 rounded">{JSON.stringify(content, null, 2)}</pre>;
+      return <pre className="text-xs text-red-400 overflow-auto bg-black p-2 rounded">{safeJson(content)}</pre>;
     }
 
     return content.split(/(```[\s\S]*?```)/g).map((part, idx) => {
@@ -883,7 +916,9 @@ export default function App() {
             <div className="flex justify-between items-center bg-[#151532] px-3 py-1.5 text-xs text-gray-400">
               <span className="uppercase text-[#aaffee] font-bold">{language || 'CODE'}</span>
               <div className="flex gap-2">
-                <button onClick={() => { navigator.clipboard.writeText(code); setCopiedTextId(blockId); setTimeout(() => setCopiedTextId(null), 2000); }} className="hover:text-white flex items-center gap-1">{copiedTextId === blockId ? <CheckCheck size={14} className="text-[#00ffcc]" /> : <Copy size={14} />}</button>
+                <button onClick={() => { navigator.clipboard.writeText(code); setCopiedTextId(blockId); setTimeout(() => setCopiedTextId(null), 2000); }} className="hover:text-white flex items-center gap-1">
+                  {copiedTextId === blockId ? <CheckCheck size={14} className="text-[#00ffcc]" /> : <Copy size={14} />}
+                </button>
                 {isHTML && <button onClick={() => { setArtifactCode(code); setArtifactOpen(true); }} className="text-[#00ffcc] hover:text-white flex items-center gap-1 font-bold ml-2"><Play size={14} /> Run Sandbox</button>}
                 {isPython && <button onClick={() => runPythonInBrowser(code)} className="text-[#bf5af2] hover:text-white flex items-center gap-1 font-bold ml-2"><Play size={14} /> Run Python WASM</button>}
               </div>
@@ -922,9 +957,11 @@ export default function App() {
   const getSessionStats = () => {
     const current = getActiveSession();
     if (!current) return { count: 0, estimatedTokens: 0 };
-    const charCount = current.messages.reduce((acc, m) => acc + (typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length), 0);
-    return { count: current.messages.length, estimatedTokens: Math.ceil(charCount / 4) };
+    const chars = current.messages.reduce((acc, m) => acc + (typeof m.content === 'string' ? m.content.length : safeJson(m.content).length), 0);
+    return { count: current.messages.length, estimatedTokens: Math.ceil(chars / 4) };
   };
+
+  const stats = getSessionStats();
 
   if (appLocked) {
     return (
@@ -932,7 +969,7 @@ export default function App() {
         <div className="bg-[#0c0c1f] border border-[#00ffcc]/30 p-8 rounded-3xl w-full max-w-sm shadow-2xl space-y-6">
           <Key className="text-[#00ffcc] animate-pulse mx-auto" size={48} />
           <h2 className="text-[#00ffcc] font-black text-xl uppercase tracking-widest">{APP_FULL}</h2>
-          <p className="text-xs text-gray-400">Lockout enabled. Enter your secret 4-Digit Pin to unlock this workspace.</p>
+          <p className="text-xs text-gray-400">Lockout enabled. Enter your 4-digit PIN to unlock.</p>
           <input
             type="password"
             maxLength={4}
@@ -942,15 +979,13 @@ export default function App() {
             className="w-full bg-[#050511] border border-[#1e1b4b] rounded-xl p-3 text-center text-white tracking-widest font-black outline-none focus:border-[#00ffcc]"
           />
           <div className="flex gap-2">
-            <button onClick={handlePinSubmit} className="flex-1 bg-[#00ffcc] text-black font-bold py-3 rounded-xl transition-all shadow-lg shadow-[#00ffcc]/10">Unlock System</button>
+            <button onClick={handlePinSubmit} className="flex-1 bg-[#00ffcc] text-black font-bold py-3 rounded-xl">Unlock System</button>
             <button onClick={setupNewPin} className="px-4 bg-[#151536] text-white rounded-xl">Save</button>
           </div>
         </div>
       </div>
     );
   }
-
-  const stats = getSessionStats();
 
   return (
     <div className={`flex h-screen overflow-hidden font-sans ${isLightMode ? 'bg-[#f4f5f6] text-[#333]' : 'bg-[#03030b] text-[#cbd5e1]'}`}>
@@ -976,7 +1011,7 @@ export default function App() {
 
         <div className="mx-3 mt-4 p-4 rounded-xl bg-gradient-to-br from-[#0a0a24] to-[#0d0d2b] border border-[#1e1b4b] text-white">
           <div className="flex items-center gap-2 text-[#bf5af2] mb-2"><Activity size={14} /><span className="text-[10px] font-black uppercase">Focus Timer</span></div>
-          <div className="text-2xl font-mono text-center mb-3">{new Date(timeLeft * 1000).toISOString().substr(14, 5)}</div>
+          <div className="text-2xl font-mono text-center mb-3">{formatTime(timeLeft)}</div>
           <div className="flex gap-2">
             <button onClick={() => setIsTimerRunning(!isTimerRunning)} className={`flex-1 py-1.5 rounded-lg text-xs font-bold ${isTimerRunning ? 'bg-[#ff3b30]/20 text-[#ff3b30]' : 'bg-[#00ffcc] text-black'}`}>{isTimerRunning ? 'Pause' : 'Start'}</button>
             <button onClick={() => { setIsTimerRunning(false); setTimeLeft(25 * 60); }} className="px-3 rounded-lg bg-[#151536] text-gray-400 hover:text-white flex items-center justify-center"><RotateCcw size={14} /></button>
@@ -1056,10 +1091,14 @@ export default function App() {
           <div className={`flex-1 flex flex-col relative ${artifactFullscreen ? 'hidden' : 'flex'} ${isLightMode ? 'bg-white' : 'bg-gradient-to-b from-[#03030a] to-[#010103]'}`}>
             <div className="p-2 border-b border-gray-800 bg-[#070716]/60 flex gap-1.5 overflow-x-auto">
               {PROMPT_TEMPLATES.map((tmpl, tIdx) => (
-                <button key={tIdx} onClick={() => setChatInput(tmpl.prompt)} className="px-2.5 py-1 bg-black/40 hover:bg-[#00ffcc]/10 hover:text-[#00ffcc] text-gray-400 border border-gray-800 rounded-lg text-[10px] tracking-wide shrink-0">{tmpl.label}</button>
+                <button key={tIdx} onClick={() => setChatInput(tmpl.prompt)} className="px-2.5 py-1 bg-black/40 hover:bg-[#00ffcc]/10 hover:text-[#00ffcc] text-gray-400 border border-gray-800 rounded-lg text-[10px] tracking-wide shrink-0">
+                  {tmpl.label}
+                </button>
               ))}
               {QUICK_ACTIONS.map((a, i) => (
-                <button key={`qa-${i}`} onClick={() => setChatInput(a.prompt)} className="px-2.5 py-1 bg-black/40 hover:bg-[#bf5af2]/10 hover:text-[#bf5af2] text-gray-400 border border-gray-800 rounded-lg text-[10px] tracking-wide shrink-0">{a.label}</button>
+                <button key={`qa-${i}`} onClick={() => setChatInput(a.prompt)} className="px-2.5 py-1 bg-black/40 hover:bg-[#bf5af2]/10 hover:text-[#bf5af2] text-gray-400 border border-gray-800 rounded-lg text-[10px] tracking-wide shrink-0">
+                  {a.label}
+                </button>
               ))}
             </div>
 
@@ -1076,10 +1115,15 @@ export default function App() {
                   <div className={`max-w-[85%] rounded-xl p-4 border relative ${fontSize} ${msg.role === 'user' ? 'bg-[#151532]/40 border-[#3a3a60]/50 text-white' : 'bg-[#090919] border-[#1c1c3a] text-gray-200'}`}>
                     {msg.attachments?.length > 0 && (
                       <div className="flex gap-2 mb-2">
-                        {msg.attachments.map((att, idx) => (att.type === 'image' ? <img key={idx} src={att.data} alt="Upload" className="h-12 w-12 object-cover rounded border border-gray-600" /> : <div key={idx} className="bg-black text-xs px-2 py-1 rounded text-[#bf5af2]"><FileText size={12} className="inline" /> {att.name}</div>))}
+                        {msg.attachments.map((att, idx) => att.type === 'image'
+                          ? <img key={idx} src={att.data} alt="Upload" className="h-12 w-12 object-cover rounded border border-gray-600" />
+                          : <div key={idx} className="bg-black text-xs px-2 py-1 rounded text-[#bf5af2]"><FileText size={12} className="inline" /> {att.name}</div>
+                        )}
                       </div>
                     )}
+
                     {renderFormattedMessage(msg.content, `msg-${i}`)}
+
                     {msg.role === 'assistant' && (
                       <div className="mt-3 pt-2 border-t border-gray-800 flex items-center justify-between">
                         <div className="flex gap-3">
@@ -1094,8 +1138,17 @@ export default function App() {
                 </div>
               ))}
 
-              {isTyping && streamedResponse && <div className="flex justify-start"><div className={`max-w-[85%] rounded-xl p-4 bg-[#090919] border border-[#00ffcc]/30 text-white ${fontSize}`}>{renderFormattedMessage(streamedResponse, 'stream')}</div></div>}
-              {isTyping && !streamedResponse && <div className="flex items-center gap-2 text-[#00ffcc] text-xs"><BrainCircuit size={14} className="animate-spin" /> Parsing models...</div>}
+              {isTyping && streamedResponse && (
+                <div className="flex justify-start">
+                  <div className={`max-w-[85%] rounded-xl p-4 bg-[#090919] border border-[#00ffcc]/30 text-white ${fontSize}`}>
+                    {renderFormattedMessage(streamedResponse, 'stream')}
+                  </div>
+                </div>
+              )}
+
+              {isTyping && !streamedResponse && (
+                <div className="flex items-center gap-2 text-[#00ffcc] text-xs"><BrainCircuit size={14} className="animate-spin" /> Parsing models...</div>
+              )}
               <div ref={chatEndRef} />
             </div>
 
@@ -1119,23 +1172,30 @@ export default function App() {
 
             {!isTyping && currentSession?.messages.length > 0 && (
               <div className="px-4 py-2 flex gap-2 overflow-x-auto scrollbar-none bg-[#03030b]/40">
-                {['Summarize the code framework', 'Explain this concept in details', 'Give me 3 learning check quiz questions'].map((suggestion, sIdx) => (
-                  <button key={sIdx} onClick={() => handleChatSubmit(null, suggestion)} className="px-3 py-1 bg-black/40 hover:bg-[#00ffcc]/15 text-xs text-[#00ffcc] border border-[#00ffcc]/20 rounded-full shrink-0 transition-all font-semibold">{suggestion}</button>
+                {['Summarize the code framework', 'Explain this concept in detail', 'Give me 3 learning check quiz questions'].map((suggestion, sIdx) => (
+                  <button key={sIdx} onClick={() => handleChatSubmit(null, suggestion)} className="px-3 py-1 bg-black/40 hover:bg-[#00ffcc]/15 text-xs text-[#00ffcc] border border-[#00ffcc]/20 rounded-full shrink-0 transition-all font-semibold">
+                    {suggestion}
+                  </button>
                 ))}
               </div>
             )}
 
             <div className="p-3 bg-[#060614] border-t border-[#1e1b4b]/40">
               <div className="flex gap-2 items-center">
-                <button onClick={toggleCamera} className={`p-3 rounded-xl border ${isCameraActive ? 'bg-red-500/20 border-red-500 text-red-500' : 'bg-[#0d0d23] border-[#1e1b4b] text-gray-400 hover:text-white'}`}>{isCameraActive ? <CameraOff size={18} /> : <Camera size={18} />}</button>
-                <label className="p-3 rounded-xl bg-[#0d0d23] border border-[#1e1b4b] text-gray-400 hover:text-[#00ffcc] cursor-pointer"><input type="file" accept="image/*,.txt,.pdf,.mp3,.wav" onChange={handleFileUpload} className="hidden" /><Paperclip size={18} /></label>
+                <button onClick={toggleCamera} className={`p-3 rounded-xl border ${isCameraActive ? 'bg-red-500/20 border-red-500 text-red-500' : 'bg-[#0d0d23] border-[#1e1b4b] text-gray-400 hover:text-white'}`}>
+                  {isCameraActive ? <CameraOff size={18} /> : <Camera size={18} />}
+                </button>
+                <label className="p-3 rounded-xl bg-[#0d0d23] border border-[#1e1b4b] text-gray-400 hover:text-[#00ffcc] cursor-pointer">
+                  <input type="file" accept="image/*,.txt,.pdf,.mp3,.wav" onChange={handleFileUpload} className="hidden" />
+                  <Paperclip size={18} />
+                </label>
                 <form onSubmit={handleChatSubmit} className="flex-1 relative">
                   <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} disabled={isProcessingFile} placeholder={isProcessingFile ? 'Extracting file data...' : 'Ask Singularity...'} className="w-full bg-[#0d0d23] border border-[#1e1b4b] rounded-xl py-3 px-4 text-sm text-white outline-none focus:border-[#00ffcc]/50" />
                   <button type="submit" disabled={isProcessingFile} className="absolute right-2 top-2 p-1.5 rounded-lg bg-[#00ffcc]/10 text-[#00ffcc] hover:bg-[#00ffcc] hover:text-black"><Send size={16} /></button>
                 </form>
                 <button onClick={handleImageGeneration} className="p-3 rounded-xl bg-[#0d0d23] border border-[#1e1b4b] text-gray-400 hover:text-[#bf5af2]"><ImageIcon size={18} /></button>
               </div>
-              <div className="mt-2 flex gap-2 items-center text-[10px] text-gray-500">
+              <div className="mt-2 flex gap-2 items-center text-[10px] text-gray-500 flex-wrap">
                 <button onClick={() => setDeepThinking(!deepThinking)} className={`px-2 py-1 rounded ${deepThinking ? 'bg-[#00ffcc]/10 text-[#00ffcc]' : 'bg-black/30'}`}>Deep Think</button>
                 <button onClick={toggleIncognitoMode} className={`px-2 py-1 rounded ${isIncognito ? 'bg-purple-500/20 text-purple-300' : 'bg-black/30'}`}>Incognito</button>
                 <button onClick={() => setIsContinuousVoice(!isContinuousVoice)} className={`px-2 py-1 rounded ${isContinuousVoice ? 'bg-[#00ffcc]/10 text-[#00ffcc]' : 'bg-black/30'}`}>Voice Loop</button>
@@ -1150,10 +1210,12 @@ export default function App() {
               <div className="p-1 border-b border-[#1e1b4b] flex items-center justify-between bg-black/40">
                 <div className="flex gap-1 overflow-x-auto">
                   {canvasTabs.map((tab) => (
-                    <button key={tab.id} onClick={() => { setActiveCanvasTab(tab.id); setArtifactCode(tab.code); }} className={`px-3 py-1 rounded text-xs font-bold transition-all shrink-0 ${activeCanvasTab === tab.id ? 'bg-[#00ffcc]/10 text-[#00ffcc]' : 'text-gray-400'}`}>{tab.name}</button>
+                    <button key={tab.id} onClick={() => { setActiveCanvasTab(tab.id); setArtifactCode(tab.code); }} className={`px-3 py-1 rounded text-xs font-bold transition-all shrink-0 ${activeCanvasTab === tab.id ? 'bg-[#00ffcc]/10 text-[#00ffcc]' : 'text-gray-400'}`}>
+                      {tab.name}
+                    </button>
                   ))}
                 </div>
-                <button onClick={() => { const newId = `tab_${Date.now()}`; setCanvasTabs([...canvasTabs, { id: newId, name: `workspace_${canvasTabs.length + 1}.html`, code: '<h1>Empty File</h1>' }]); setActiveCanvasTab(newId); }} className="p-1 text-[#00ffcc] bg-gray-900 rounded"><Plus size={12} /></button>
+                <button onClick={() => { const newId = `tab_${Date.now()}`; setCanvasTabs((prev) => [...prev, { id: newId, name: `workspace_${prev.length + 1}.html`, code: '<h1>Empty File</h1>' }]); setActiveCanvasTab(newId); }} className="p-1 text-[#00ffcc] bg-gray-900 rounded"><Plus size={12} /></button>
               </div>
 
               <div className="flex justify-between bg-black/60 p-2 border-b border-[#1e1b4b]">
@@ -1171,10 +1233,16 @@ export default function App() {
               <div className="flex-1 bg-white relative">
                 {canvasTabMode === 'preview' ? (
                   isPythonLoading ? (
-                    <div className="absolute inset-0 bg-black flex flex-col items-center justify-center p-4 text-center"><Loader2 size={32} className="animate-spin text-[#bf5af2] mb-2" /><span className="text-xs text-[#bf5af2]">Executing script logic...</span></div>
+                    <div className="absolute inset-0 bg-black flex flex-col items-center justify-center p-4 text-center">
+                      <Loader2 size={32} className="animate-spin text-[#bf5af2] mb-2" />
+                      <span className="text-xs text-[#bf5af2]">Executing script logic...</span>
+                    </div>
                   ) : pythonOutput ? (
                     <div className="absolute inset-0 bg-[#050511] text-[#00ffcc] p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap">
-                      <div className="flex justify-between border-b border-gray-800 pb-2 mb-3"><span className="font-bold text-white uppercase text-[10px]">Python WASM Output Console</span><button onClick={() => setPythonOutput('')} className="text-red-500 font-bold uppercase text-[10px]">Clear console</button></div>
+                      <div className="flex justify-between border-b border-gray-800 pb-2 mb-3">
+                        <span className="font-bold text-white uppercase text-[10px]">Python WASM Output Console</span>
+                        <button onClick={() => setPythonOutput('')} className="text-red-500 font-bold uppercase text-[10px]">Clear console</button>
+                      </div>
                       {pythonOutput}
                     </div>
                   ) : (
@@ -1209,9 +1277,20 @@ export default function App() {
                 <button onClick={() => setSelectedModel('gunnarz-singularity')} className="text-red-500"><X size={18} /></button>
               </div>
 
-              <div><label className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-2">Groq Console Key</label><input type="password" value={keys.groq} onChange={(e) => saveKeys({ ...keys, groq: e.target.value })} placeholder="gsk_..." className="w-full bg-[#050511] border border-[#1e1b4b] p-3 rounded-lg text-white outline-none text-xs" /></div>
-              <div><label className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-2">OpenRouter API Key</label><input type="password" value={keys.openrouter} onChange={(e) => saveKeys({ ...keys, openrouter: e.target.value })} placeholder="sk-or_..." className="w-full bg-[#050511] border border-[#1e1b4b] p-3 rounded-lg text-white outline-none text-xs" /></div>
-              <div><label className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-2">HuggingFace Token</label><input type="password" value={keys.hf} onChange={(e) => saveKeys({ ...keys, hf: e.target.value })} placeholder="hf_..." className="w-full bg-[#050511] border border-[#1e1b4b] p-3 rounded-lg text-white outline-none text-xs" /></div>
+              <div>
+                <label className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-2">Groq Console Key</label>
+                <input type="password" value={keys.groq} onChange={(e) => saveKeys({ ...keys, groq: e.target.value })} placeholder="gsk_..." className="w-full bg-[#050511] border border-[#1e1b4b] p-3 rounded-lg text-white outline-none text-xs" />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-2">OpenRouter API Key</label>
+                <input type="password" value={keys.openrouter} onChange={(e) => saveKeys({ ...keys, openrouter: e.target.value })} placeholder="sk-or_..." className="w-full bg-[#050511] border border-[#1e1b4b] p-3 rounded-lg text-white outline-none text-xs" />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-2">HuggingFace Token</label>
+                <input type="password" value={keys.hf} onChange={(e) => saveKeys({ ...keys, hf: e.target.value })} placeholder="hf_..." className="w-full bg-[#050511] border border-[#1e1b4b] p-3 rounded-lg text-white outline-none text-xs" />
+              </div>
 
               <div className="border-t border-gray-800 pt-3">
                 <span className="block text-[10px] font-black uppercase text-gray-400 tracking-wider mb-2">Local App PIN Security</span>
