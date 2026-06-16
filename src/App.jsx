@@ -89,6 +89,21 @@ const MODEL_MODES = {
   "open-router":         { name: "OpenRouter Suite",         model: "openrouter",                     color: "#bf5af2", costPer1k: 0.0002  }
 };
 
+const OPENROUTER_FALLBACK_MODELS = [
+  { slug: "openrouter/free", name: "OpenRouter Free Router", provider: "OpenRouter", category: "router", costHint: "Free router" },
+  { slug: "openai/gpt-4.1", name: "GPT-4.1", provider: "OpenAI", category: "general", costHint: "High quality" },
+  { slug: "openai/gpt-4o", name: "GPT-4o", provider: "OpenAI", category: "multimodal", costHint: "Fast multimodal" },
+  { slug: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", provider: "Anthropic", category: "reasoning", costHint: "Balanced reasoning" },
+  { slug: "anthropic/claude-opus-4", name: "Claude Opus 4", provider: "Anthropic", category: "reasoning", costHint: "Top tier" },
+  { slug: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "Google", category: "reasoning", costHint: "Long context" },
+  { slug: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google", category: "fast", costHint: "Fast and efficient" },
+  { slug: "meta-llama/llama-4-maverick", name: "Llama 4 Maverick", provider: "Meta", category: "general", costHint: "Strong open model" },
+  { slug: "meta-llama/llama-4-scout", name: "Llama 4 Scout", provider: "Meta", category: "fast", costHint: "Compact and quick" },
+  { slug: "qwen/qwen3-max", name: "Qwen3 Max", provider: "Qwen", category: "coding", costHint: "Coding and agents" },
+  { slug: "qwen/qwen3-coder", name: "Qwen3 Coder", provider: "Qwen", category: "coding", costHint: "Coding focused" },
+  { slug: "mistralai/mistral-small-3.2", name: "Mistral Small 3.2", provider: "Mistral", category: "fast", costHint: "Fast general model" }
+];
+
 const PROMPT_TEMPLATES = [
   { label: "👶 Explain Like I'm 5",  prompt: "Explain the following concept like I am a 5 year old using simple analogies:\n" },
   { label: "🐛 Debug Code Block",     prompt: "Inspect the following code for bugs, errors, or performance issues and explain the fix cleanly:\n" },
@@ -109,7 +124,7 @@ function formatTime(seconds) {
 
 function safeGetItem(key) {
   try {
-    return safeGetItem(key);
+    return window.localStorage.getItem(key);
   } catch {
     return null;
   }
@@ -117,7 +132,15 @@ function safeGetItem(key) {
 
 function safeSetItem(key, value) {
   try {
-    safeSetItem(key, value);
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage failures in private / restricted modes.
+  }
+}
+
+function safeRemoveItem(key) {
+  try {
+    window.localStorage.removeItem(key);
   } catch {
     // Ignore storage failures in private / restricted modes.
   }
@@ -137,6 +160,10 @@ export default function App() {
   const [keys,             setKeys]             = useState({ groq: '', hf: '', openrouter: '', gemini: '' });
   const [customORModel,    setCustomORModel]    = useState("google/gemini-2.5-flash");
   const [selectedModel,    setSelectedModel]    = useState("gunnarz-singularity");
+  const [modelLibraryOpen, setModelLibraryOpen] = useState(false);
+  const [openRouterModels, setOpenRouterModels] = useState([]);
+  const [openRouterStatus, setOpenRouterStatus] = useState("loading");
+  const [openRouterSearch, setOpenRouterSearch] = useState("");
 
   // FIX #10 — dedicated settings state, no longer hijacking selectedModel
   const [showSettings,     setShowSettings]     = useState(false);
@@ -226,6 +253,19 @@ export default function App() {
 
   const themeStyles = THEME_PRESETS[activeTheme] || THEME_PRESETS['cyber'];
 
+  const currentModelMeta = useMemo(() => {
+    if (selectedModel === 'open-router') {
+      return {
+        id: customORModel,
+        name: customORModel,
+        model: customORModel,
+        color: "#bf5af2",
+        costPer1k: 0.0002
+      };
+    }
+    return MODEL_MODES[selectedModel] || MODEL_MODES['gunnarz-singularity'];
+  }, [selectedModel, customORModel]);
+
   // ──────────────────────────────────────────
   // 2. DERIVED STATE  (FIX #19 — useMemo)
   // ──────────────────────────────────────────
@@ -239,6 +279,16 @@ export default function App() {
     if (!searchQuery.trim()) return msgs;
     return msgs.filter(msg => getMessageSearchableText(msg.content).toLowerCase().includes(searchQuery.toLowerCase()));
   }, [currentSession, searchQuery]);
+
+  const visibleOpenRouterModels = useMemo(() => {
+    const base = openRouterModels.length > 0 ? openRouterModels : OPENROUTER_FALLBACK_MODELS;
+    const q = openRouterSearch.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter(m => {
+      const hay = `${m.slug || ''} ${m.name || ''} ${m.provider || ''} ${m.category || ''} ${m.costHint || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [openRouterModels, openRouterSearch]);
 
   // ──────────────────────────────────────────
   // 3. TOAST SYSTEM  (FIX #14)
@@ -341,6 +391,47 @@ export default function App() {
   function saveKeys(newKeys) {
     setKeys(newKeys);
     safeSetItem('gunnarz_premium_keys_v4', JSON.stringify(newKeys));
+  }
+
+  function saveOpenRouterChoice(modelSlug) {
+    setCustomORModel(modelSlug);
+    safeSetItem('gunnarz_openrouter_model_v4', modelSlug);
+  }
+
+  async function loadOpenRouterModels() {
+    setOpenRouterStatus("loading");
+    try {
+      const headers = keys.openrouter ? { Authorization: `Bearer ${keys.openrouter}` } : {};
+      const res = await fetch('https://openrouter.ai/api/v1/models?output_modalities=text&sort=most-popular', { headers });
+      const data = await res.json();
+      const models = Array.isArray(data?.data)
+        ? data.data.map(m => ({
+            slug: m.id || m.canonical_slug || '',
+            name: m.name || m.id || m.canonical_slug || 'Unknown model',
+            provider: m.top_provider?.name || m.provider || (m.id || '').split('/')[0] || 'OpenRouter',
+            category: (m.architecture?.modality || m.description || 'text').toString().slice(0, 40),
+            costHint: m.pricing ? `$${m.pricing.prompt || 0}/M in` : 'Available'
+          })).filter(m => m.slug)
+        : [];
+      setOpenRouterModels(models);
+      setOpenRouterStatus(models.length ? `Loaded ${models.length} models` : "No models returned");
+    } catch {
+      setOpenRouterModels(OPENROUTER_FALLBACK_MODELS);
+      setOpenRouterStatus("Using offline model list");
+    }
+  }
+
+  function chooseModel(modelKey) {
+    if (modelKey === 'open-router') {
+      setSelectedModel('open-router');
+      setModelLibraryOpen(true);
+      if (!customORModel && OPENROUTER_FALLBACK_MODELS[0]) {
+        saveOpenRouterChoice(OPENROUTER_FALLBACK_MODELS[0].slug);
+      }
+      return;
+    }
+    setSelectedModel(modelKey);
+    safeSetItem('gunnarz_selected_model_v4', modelKey);
   }
 
   // ──────────────────────────────────────────
@@ -700,7 +791,7 @@ export default function App() {
       const tokens = Math.ceil(reply.length / 4) + Math.ceil(activeText.length / 4);
       setTokenCostMeter(prev => ({
         totalTokens: prev.totalTokens + tokens,
-        totalCost:   prev.totalCost + (tokens / 1000) * (MODEL_MODES[selectedModel]?.costPer1k || 0.00015)
+        totalCost:   prev.totalCost + (tokens / 1000) * (currentModelMeta?.costPer1k || 0.00015)
       }));
 
       // FIX #8 — functional update to avoid stale sessions
@@ -1027,9 +1118,10 @@ export default function App() {
       try {
         const sess = JSON.parse(ev.target.result);
         if (sess.id && sess.title && Array.isArray(sess.messages)) {
-          sess.id = 'imported_' + Date.now();
+          const newId = 'imported_' + Date.now();
+          sess.id = newId;
           updateSessions(prev => [sess, ...prev]);
-          setActiveSessionId(sess.id);
+          setActiveSessionId(newId);
           addToast('success', "Session imported!");
         } else { addToast('error', "Invalid session JSON format."); }
       } catch { addToast('error', "Parse error. Check file integrity."); }
@@ -1091,12 +1183,27 @@ export default function App() {
   // Mount: load persisted state
   useEffect(() => {
     let envGroq = '', envHf = '';
-    try { if (typeof process !== 'undefined') { envGroq = process.env?.VITE_GROQ_API_KEY || ''; envHf = process.env?.VITE_HF_TOKEN || ''; } } catch { /* no env */ }
+    try {
+      if (typeof process !== 'undefined') {
+        envGroq = process.env?.VITE_GROQ_API_KEY || '';
+        envHf = process.env?.VITE_HF_TOKEN || '';
+      }
+    } catch { /* no env */ }
+
+    if (navigator.storage?.persist) {
+      navigator.storage.persist().catch(() => {});
+    }
 
     const savedKeys = safeGetItem('gunnarz_premium_keys_v4');
     let finalKeys   = { groq: envGroq, hf: envHf, openrouter: '', gemini: '' };
     if (savedKeys) { try { const p = JSON.parse(savedKeys); finalKeys = { ...finalKeys, ...p }; } catch { /* ignore */ } }
     setKeys(finalKeys);
+
+    const savedModel = safeGetItem('gunnarz_selected_model_v4');
+    if (savedModel && MODEL_MODES[savedModel]) setSelectedModel(savedModel);
+
+    const savedORModel = safeGetItem('gunnarz_openrouter_model_v4');
+    if (savedORModel) setCustomORModel(savedORModel);
 
     const savedPin = safeGetItem('gunnarz_app_pin');
     if (savedPin) { setAppLocked(true); setAppPin(savedPin); }
@@ -1129,7 +1236,16 @@ export default function App() {
         if (cleansed.length > 0) setActiveSessionId(cleansed[0].id);
       } catch { setupDefaultSession(); }
     } else { setupDefaultSession(); }
+
+    loadOpenRouterModels();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    safeSetItem('gunnarz_selected_model_v4', selectedModel);
+    if (selectedModel === 'open-router') {
+      safeSetItem('gunnarz_openrouter_model_v4', customORModel);
+    }
+  }, [selectedModel, customORModel]);
 
   // ──────────────────────────────────────────
   // 11. RENDER HELPERS
@@ -1390,6 +1506,9 @@ export default function App() {
           <div className="flex items-center gap-3">
             <button onClick={() => setSidebarOpen(!sidebarOpen)} className={`p-2 bg-black/30 rounded-lg ${themeStyles.accent}`}><PanelLeftOpen size={16}/></button>
             <span className={`font-black text-sm text-transparent bg-clip-text bg-gradient-to-r ${activeTheme === 'neon' ? 'from-[#d946ef] to-[#a21caf]' : 'from-[#00ffcc] to-[#bf5af2]'}`}>{APP_FULL}</span>
+            <span className="hidden sm:inline-flex text-[9px] bg-white/5 text-gray-400 border border-white/10 px-2 py-0.5 rounded font-black uppercase truncate max-w-[180px]">
+              {selectedModel === 'open-router' ? `Open Suite • ${customORModel}` : MODEL_MODES[selectedModel]?.name}
+            </span>
             {isIncognito && <span className="text-[9px] bg-purple-500/20 text-purple-400 border border-purple-500/40 px-2 py-0.5 rounded font-black uppercase">Incognito</span>}
           </div>
           <div className="flex gap-2 items-center">
@@ -1402,17 +1521,27 @@ export default function App() {
               className={`p-1.5 rounded-lg text-xs font-bold border ${showMemoryPanel ? `border-white/30 ${themeStyles.accent}` : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'}`}>
               <Database size={14}/>
             </button>
-            <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
+            <select value={selectedModel} onChange={e => chooseModel(e.target.value)}
               className="hidden sm:block bg-black/30 border border-white/10 text-xs text-white rounded-lg px-2 py-1.5 outline-none">
               {Object.keys(MODEL_MODES).map(k => <option key={k} value={k}>{MODEL_MODES[k].name}</option>)}
             </select>
             {selectedModel === 'open-router' && (
-              <input type="text" value={customORModel} onChange={e => setCustomORModel(e.target.value)} placeholder="model-slug"
-                className="bg-black text-[10px] text-white px-2 py-1.5 rounded-lg border border-white/10 w-36"/>
+              <div className="hidden md:flex items-center gap-2">
+                <input type="text" value={customORModel} onChange={e => saveOpenRouterChoice(e.target.value)} placeholder="model-slug"
+                  className="bg-black text-[10px] text-white px-2 py-1.5 rounded-lg border border-white/10 w-44"/>
+                <button onClick={() => setModelLibraryOpen(true)}
+                  className="px-2.5 py-1.5 rounded-lg text-[10px] font-bold bg-[#bf5af2]/15 border border-[#bf5af2]/30 text-[#e9d5ff]">
+                  Browse
+                </button>
+              </div>
             )}
             <button onClick={() => setArtifactOpen(!artifactOpen)}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold border flex items-center gap-1 ${artifactOpen ? 'bg-purple-500/20 border-purple-500 text-purple-400' : 'bg-black/30 border-white/10 text-gray-400 hover:text-white'}`}>
               <LayoutTemplate size={14}/> Workspace
+            </button>
+            <button onClick={() => setModelLibraryOpen(true)}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold border flex items-center gap-1 bg-black/30 border-white/10 text-gray-400 hover:text-white">
+              <Search size={14}/> Models
             </button>
             {/* FIX #10 — settings uses dedicated state, not model slot */}
             <button onClick={() => setShowSettings(true)} className="p-1.5 bg-black/30 rounded-lg text-gray-400 hover:text-white"><Settings size={16}/></button>
@@ -1642,7 +1771,7 @@ export default function App() {
               {/* Mode bar */}
               <div className="flex justify-between bg-black/60 p-2 border-b border-white/10">
                 <div className="flex bg-black/40 rounded-lg p-1 gap-1">
-                  {['preview','html','css','js'].map(mode => (
+                  {['preview','split','html','css','js'].map(mode => (
                     <button key={mode} onClick={() => setCanvasSplitMode(mode)}
                       className={`px-3 py-1 text-xs font-bold rounded flex items-center gap-1 ${canvasSplitMode === mode ? `bg-white/10 ${themeStyles.accent}` : 'text-gray-500'}`}>
                       {mode === 'preview' ? <><MonitorPlay size={13}/> Preview</> : mode.toUpperCase()}
@@ -1659,6 +1788,39 @@ export default function App() {
               <div className="flex-1 flex flex-col relative overflow-hidden">
                 {canvasSplitMode === 'preview' ? (
                   <iframe srcDoc={compileSandboxFrame()} sandbox="allow-scripts allow-modals allow-popups" className="w-full flex-1 border-none bg-white"/>
+                ) : canvasSplitMode === 'split' ? (
+                  <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 min-h-0">
+                    <div className="flex flex-col min-h-0 border-b lg:border-b-0 lg:border-r border-white/10">
+                      <div className="px-3 py-2 bg-black/40 border-b border-white/10 text-[10px] font-black uppercase text-gray-400">HTML / CSS / JS</div>
+                      <div className="grid grid-rows-3 flex-1 min-h-0 gap-0">
+                        {['html','css','js'].map(field => (
+                          <textarea key={field} value={getActiveTabState()[field] || ''}
+                            onChange={e => handleWorkspaceChange(field, e.target.value)}
+                            placeholder={field.toUpperCase()}
+                            className="w-full min-h-0 bg-[#0a0a1a] text-gray-200 font-mono text-[12px] p-3 outline-none resize-none border-b border-white/10"
+                            spellCheck="false"/>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex flex-col min-h-0">
+                      <div className="px-3 py-2 bg-black/40 border-b border-white/10 text-[10px] font-black uppercase text-gray-400 flex items-center justify-between">
+                        <span>Preview + Console</span>
+                        <button onClick={downloadSandboxCode} className="text-gray-400 hover:text-white"><Download size={13}/></button>
+                      </div>
+                      <iframe srcDoc={compileSandboxFrame()} sandbox="allow-scripts allow-modals allow-popups" className="w-full flex-1 border-none bg-white"/>
+                      <div className="h-28 bg-[#03030b] border-t border-white/10 p-2 overflow-y-auto font-mono text-[10px] text-gray-400">
+                        <span className={`font-bold block mb-1 ${themeStyles.accent}`}>RUNTIME CONSOLE:</span>
+                        {sandboxLogs.length === 0
+                          ? <span className="text-gray-700">No output yet. Run some JS.</span>
+                          : sandboxLogs.map((log, li) => (
+                            <div key={li} className={log.type === 'error' ? 'text-red-400' : 'text-gray-300'}>
+                              [{log.type.toUpperCase()}] {log.text}
+                            </div>
+                          ))
+                        }
+                      </div>
+                    </div>
+                  </div>
                 ) : (
                   <textarea value={getActiveTabState()[canvasSplitMode] || ''}
                     onChange={e => handleWorkspaceChange(canvasSplitMode, e.target.value)}
@@ -1667,20 +1829,42 @@ export default function App() {
                 )}
 
                 {/* FIX #4 — Console log output actually captured now */}
-                <div className="h-24 bg-[#03030b] border-t border-white/10 p-2 overflow-y-auto font-mono text-[10px] text-gray-400">
-                  <span className={`font-bold block mb-1 ${themeStyles.accent}`}>RUNTIME CONSOLE:</span>
-                  {sandboxLogs.length === 0
-                    ? <span className="text-gray-700">No output yet. Run some JS.</span>
-                    : sandboxLogs.map((log, li) => (
-                      <div key={li} className={log.type === 'error' ? 'text-red-400' : 'text-gray-300'}>
-                        [{log.type.toUpperCase()}] {log.text}
-                      </div>
-                    ))
-                  }
-                </div>
+                {canvasSplitMode !== 'split' && (
+                  <div className="h-24 bg-[#03030b] border-t border-white/10 p-2 overflow-y-auto font-mono text-[10px] text-gray-400">
+                    <span className={`font-bold block mb-1 ${themeStyles.accent}`}>RUNTIME CONSOLE:</span>
+                    {sandboxLogs.length === 0
+                      ? <span className="text-gray-700">No output yet. Run some JS.</span>
+                      : sandboxLogs.map((log, li) => (
+                        <div key={li} className={log.type === 'error' ? 'text-red-400' : 'text-gray-300'}>
+                          [{log.type.toUpperCase()}] {log.text}
+                        </div>
+                      ))
+                    }
+                  </div>
+                )}
               </div>
             </div>
           )}
+        </div>
+
+        {/* Mobile dock */}
+        <div className="md:hidden fixed left-3 right-3 bottom-20 z-40">
+          <div className="mx-auto max-w-xl rounded-2xl border border-white/10 bg-black/80 backdrop-blur px-2 py-2 shadow-2xl flex items-center justify-between">
+            {[
+              { key: 'chat', label: 'Chat', icon: MessageSquare, action: () => { setArtifactOpen(false); setShowSettings(false); setModelLibraryOpen(false); setShowMemoryPanel(false); } },
+              { key: 'canvas', label: 'Canvas', icon: LayoutTemplate, action: () => setArtifactOpen(true) },
+              { key: 'models', label: 'Models', icon: Search, action: () => setModelLibraryOpen(true) },
+              { key: 'settings', label: 'Settings', icon: Settings, action: () => setShowSettings(true) },
+            ].map(item => {
+              const Icon = item.icon;
+              return (
+                <button key={item.key} onClick={item.action} className="flex-1 flex flex-col items-center gap-1 py-2 text-[10px] text-gray-400 hover:text-white">
+                  <Icon size={15}/>
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* ── VOICE BAR ── */}
@@ -1712,6 +1896,99 @@ export default function App() {
             {voiceStatus === 'listening' ? 'Stop' : voiceStatus === 'thinking' ? 'Thinking…' : voiceStatus === 'speaking' ? 'Speaking…' : 'Voice Sync'}
           </button>
         </div>
+
+        {/* ── MODEL LIBRARY ── */}
+        {modelLibraryOpen && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur flex justify-center items-center z-50 p-4">
+            <div className="bg-[#0c0c1f] border border-white/20 p-5 rounded-2xl w-full max-w-4xl h-[88vh] overflow-hidden flex flex-col">
+              <div className="flex justify-between items-center border-b border-white/10 pb-3">
+                <div>
+                  <h2 className={`font-bold text-sm uppercase tracking-widest ${themeStyles.accent}`}>Model Library</h2>
+                  <p className="text-[10px] text-gray-500 mt-1">{openRouterStatus}</p>
+                </div>
+                <button onClick={() => setModelLibraryOpen(false)} className="text-red-400"><X size={18}/></button>
+              </div>
+
+              <div className="mt-4 flex gap-2 flex-wrap">
+                <input
+                  type="text"
+                  value={openRouterSearch}
+                  onChange={e => setOpenRouterSearch(e.target.value)}
+                  placeholder="Search OpenRouter models…"
+                  className="flex-1 min-w-[220px] bg-[#050511] border border-white/10 p-3 rounded-xl text-white text-xs outline-none focus:border-white/30"
+                />
+                <button onClick={loadOpenRouterModels} className={`px-3 py-2 rounded-xl text-xs font-bold ${themeStyles.button}`}>
+                  Refresh OpenRouter
+                </button>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4 min-h-0 flex-1">
+                <div className="bg-black/30 border border-white/10 rounded-2xl p-3 overflow-y-auto">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-gray-400 mb-2">Built-in Modes</div>
+                  <div className="space-y-1.5">
+                    {Object.keys(MODEL_MODES).map(k => (
+                      <button key={k} onClick={() => chooseModel(k)}
+                        className={`w-full text-left px-3 py-2 rounded-xl border text-xs flex items-center justify-between ${selectedModel === k ? `border-white/20 ${themeStyles.card} text-white` : 'border-transparent hover:border-white/10 text-gray-400'}`}>
+                        <span>{MODEL_MODES[k].name}</span>
+                        <span className="text-[10px] opacity-70">{k === 'open-router' ? 'Suite' : 'Local'}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 text-[10px] font-black uppercase tracking-wider text-gray-400 mb-2">Open Suite Slug</div>
+                  <input
+                    type="text"
+                    value={customORModel}
+                    onChange={e => saveOpenRouterChoice(e.target.value)}
+                    placeholder="openrouter/model-slug"
+                    className="w-full bg-[#050511] border border-white/10 p-2.5 rounded-xl text-white text-xs outline-none focus:border-white/30"
+                  />
+                  <button onClick={() => chooseModel('open-router')} className={`mt-2 w-full rounded-xl px-3 py-2 text-xs font-bold ${themeStyles.button}`}>
+                    Use Open Suite
+                  </button>
+                </div>
+
+                <div className="bg-black/25 border border-white/10 rounded-2xl overflow-hidden flex flex-col min-h-0">
+                  <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-bold text-white">All OpenRouter models</div>
+                      <div className="text-[10px] text-gray-500">Tap one to load it into the Open Suite.</div>
+                    </div>
+                    <div className="text-[10px] text-gray-500">{visibleOpenRouterModels.length} results</div>
+                  </div>
+                  <div className="overflow-y-auto p-3 grid grid-cols-1 gap-2">
+                    {visibleOpenRouterModels.map((m, idx) => (
+                      <button
+                        key={`${m.slug}-${idx}`}
+                        onClick={() => {
+                          chooseModel('open-router');
+                          saveOpenRouterChoice(m.slug);
+                          setSelectedModel('open-router');
+                          setModelLibraryOpen(false);
+                        }}
+                        className={`text-left p-3 rounded-2xl border transition-all ${customORModel === m.slug ? `border-[#bf5af2]/50 bg-[#bf5af2]/10 text-white` : 'border-white/10 bg-black/30 text-gray-300 hover:border-white/20 hover:bg-black/40'}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-semibold truncate">{m.name}</div>
+                            <div className="text-[10px] text-gray-500 truncate">{m.slug}</div>
+                          </div>
+                          <div className="text-[10px] px-2 py-1 rounded-full bg-white/5 border border-white/10 whitespace-nowrap">
+                            {m.provider}
+                          </div>
+                        </div>
+                        <div className="mt-2 text-[10px] text-gray-500 flex items-center justify-between gap-2">
+                          <span className="truncate">{m.category}</span>
+                          <span>{m.costHint}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── MEMORY PANEL ── */}
         {showMemoryPanel && (
