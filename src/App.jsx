@@ -278,7 +278,7 @@ export default function App() {
   const [showCanvas, setShowCanvas] = useState(false);
   const [searchBarOpen, setSearchBarOpen] = useState(false);
 
-  const [apiKeys, setApiKeys] = useState({ openrouter: "", hf: "" });
+  const [apiKeys, setApiKeys] = useState({ openrouter: "", groq: "", hf: "" });
   const [rememberKeys, setRememberKeys] = useState(true);
   const [tone, setTone] = useState("balanced");
   const [selectedModel, setSelectedModel] = useState("openrouter/auto");
@@ -352,7 +352,7 @@ export default function App() {
   useEffect(() => {
     const savedSessions = safeParse(localStorage.getItem(STORAGE.sessions), []);
     const savedActive = localStorage.getItem(STORAGE.activeSession) || "";
-    const savedKeys = safeParse(localStorage.getItem(STORAGE.keys), { openrouter: "", hf: "" });
+    const savedKeys = safeParse(localStorage.getItem(STORAGE.keys), { openrouter: "", groq: "", hf: "" });
     const savedUi = safeParse(localStorage.getItem(STORAGE.ui), {});
     const savedMemory = safeParse(localStorage.getItem(STORAGE.memory), []);
     const savedStars = safeParse(localStorage.getItem(STORAGE.stars), []);
@@ -374,7 +374,7 @@ export default function App() {
     }]);
 
     setActiveSessionId(savedActive || (savedSessions[0]?.id || ""));
-    setApiKeys(savedKeys || { openrouter: "", hf: "" });
+    setApiKeys(savedKeys || { openrouter: "", groq: "", hf: "" });
     setTheme(savedUi.theme || "cyber");
     setTone(savedUi.tone || "balanced");
     setSelectedModel(savedUi.selectedModel || "openrouter/auto");
@@ -591,6 +591,67 @@ export default function App() {
     setShowCanvas(true);
   }
 
+  function isRateLimitLikeError(message = "") {
+    return /rate limit|quota|limit|429|too many requests|insufficient|exceeded|temporar/i.test(String(message).toLowerCase());
+  }
+
+  function pickGroqModel() {
+    const map = [
+      ["openai/gpt-5.2", "llama-3.3-70b-versatile"],
+      ["openai/gpt-5-chat-latest", "llama-3.3-70b-versatile"],
+      ["anthropic/claude-sonnet-4", "llama-3.3-70b-versatile"],
+      ["anthropic/claude-opus-4", "llama-3.3-70b-versatile"],
+      ["google/gemini-2.5-pro", "llama-3.3-70b-versatile"],
+      ["google/gemini-2.5-flash", "llama-3.1-8b-instant"],
+      ["perplexity/sonar-pro", "llama-3.1-8b-instant"],
+      ["meta-llama/llama-4-maverick", "llama-3.3-70b-versatile"],
+      ["qwen/qwen3-coder", "qwen/qwen3-32b"],
+    ];
+    return map.find(([needle]) => String(selectedModel).includes(needle))?.[1] || "llama-3.3-70b-versatile";
+  }
+
+  async function callGroq(messages, model = pickGroqModel()) {
+    if (!apiKeys.groq) throw new Error("Add your Groq key in Settings.");
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKeys.groq}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.7,
+        max_tokens: 2048,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error?.message || "Groq request failed.");
+    return data;
+  }
+
+  async function callHuggingFaceImage(prompt, sourceImage = "") {
+    if (!apiKeys.hf) throw new Error("Add your Hugging Face token in Settings.");
+    const model = "black-forest-labs/FLUX.1-schnell";
+    const payload = sourceImage
+      ? { inputs: { prompt, image: sourceImage } }
+      : { inputs: prompt };
+    const res = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKeys.hf}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "");
+      throw new Error(msg || "Hugging Face image request failed.");
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  }
+
   async function callOpenRouter(messages, model, modalType = "text", imageModalities = ["text"]) {
     if (!apiKeys.openrouter) throw new Error("Add your OpenRouter key in Settings.");
 
@@ -615,9 +676,22 @@ export default function App() {
       body: JSON.stringify(body),
     });
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data?.error?.message || "OpenRouter request failed.");
+      const message = data?.error?.message || "OpenRouter request failed.";
+      const rateLimited = isRateLimitLikeError(message) || res.status === 429;
+      if (rateLimited && modalType === "text" && apiKeys.groq) {
+        return { ...await callGroq(messages), _fallback: "groq" };
+      }
+      if (rateLimited && modalType === "image" && apiKeys.hf) {
+        const lastContent = messages[messages.length - 1]?.content;
+        const prompt = toPlainText(lastContent || "");
+        const sourceImage = Array.isArray(lastContent)
+          ? (lastContent.find((p) => p?.type === "image_url")?.image_url?.url || "")
+          : "";
+        return { _fallback: "hf-image", _imageUrl: await callHuggingFaceImage(prompt, sourceImage) };
+      }
+      throw new Error(message);
     }
     return data;
   }
@@ -655,43 +729,46 @@ export default function App() {
     try {
       let reply = "";
 
-      if (!apiKeys.openrouter) {
-        reply = "Add your OpenRouter key in Settings, then pick a model and send again.";
-      } else {
-        const conversation = [
-          sessionSystemPrompt(),
-          ...currentMessages.map((m) => ({
-            role: m.role,
-            content: toPlainText(m.content),
-          })),
-          {
-            role: "user",
-            content: userText,
-          },
-        ];
+      const conversation = [
+        sessionSystemPrompt(),
+        ...currentMessages.map((m) => ({
+          role: m.role,
+          content: toPlainText(m.content),
+        })),
+        {
+          role: "user",
+          content: userText,
+        },
+      ];
 
-        if (liveSearchMode || selectedModel.includes("perplexity")) {
-          conversation[0] = {
-            role: "system",
-            content: `${TONES.perplexity}\nUse concise grounded answers. If a claim is uncertain, say so.`,
+      if (liveSearchMode || selectedModel.includes("perplexity")) {
+        conversation[0] = {
+          role: "system",
+          content: `${TONES.perplexity}\nUse concise grounded answers. If a claim is uncertain, say so.`,
+        };
+      }
+
+      if (attachments.length) {
+        const imageAttachment = attachments.find((a) => String(a.type).startsWith("image/"));
+        if (imageAttachment) {
+          conversation[conversation.length - 1] = {
+            role: "user",
+            content: [
+              { type: "text", text: userText },
+              { type: "image_url", image_url: { url: imageAttachment.data } },
+            ],
           };
         }
+      }
 
-        if (attachments.length) {
-          const imageAttachment = attachments.find((a) => String(a.type).startsWith("image/"));
-          if (imageAttachment) {
-            conversation[conversation.length - 1] = {
-              role: "user",
-              content: [
-                { type: "text", text: userText },
-                { type: "image_url", image_url: { url: imageAttachment.data } },
-              ],
-            };
-          }
-        }
-
+      if (apiKeys.openrouter) {
         const result = await callOpenRouter(conversation, selectedModel, "text");
         reply = result?.choices?.[0]?.message?.content || "No response returned.";
+      } else if (apiKeys.groq) {
+        const result = await callGroq(conversation);
+        reply = result?.choices?.[0]?.message?.content || "No response returned.";
+      } else {
+        reply = "Add an OpenRouter or Groq key in Settings, then pick a model and send again.";
       }
 
       setStreamed(reply);
@@ -725,11 +802,22 @@ export default function App() {
     if (!prompt || imageBusy) return;
     setImageBusy(true);
     try {
-      if (!apiKeys.openrouter) throw new Error("Add your OpenRouter key in Settings.");
-      const messages = [{ role: "user", content: prompt }];
-      const result = await callOpenRouter(messages, selectedImageModel, "image", ["image"]);
-      const msg = result?.choices?.[0]?.message;
-      const url = msg?.images?.[0]?.imageUrl?.url || msg?.images?.[0]?.url || "";
+      let url = "";
+      if (apiKeys.openrouter) {
+        try {
+          const messages = [{ role: "user", content: prompt }];
+          const result = await callOpenRouter(messages, selectedImageModel, "image", ["image"]);
+          const msg = result?.choices?.[0]?.message;
+          url = msg?.images?.[0]?.imageUrl?.url || msg?.images?.[0]?.url || result?._imageUrl || "";
+        } catch (err) {
+          if (!apiKeys.hf) throw err;
+          url = await callHuggingFaceImage(prompt);
+        }
+      } else if (apiKeys.hf) {
+        url = await callHuggingFaceImage(prompt);
+      } else {
+        throw new Error("Add an OpenRouter or Hugging Face key in Settings.");
+      }
       if (!url) throw new Error("No image returned by the model.");
       setImageResult(url);
     } catch (err) {
@@ -748,19 +836,30 @@ export default function App() {
     }
     setImageBusy(true);
     try {
-      if (!apiKeys.openrouter) throw new Error("Add your OpenRouter key in Settings.");
-      const messages = [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: imageSource } },
-          ],
-        },
-      ];
-      const result = await callOpenRouter(messages, selectedImageModel, "image", ["image", "text"]);
-      const msg = result?.choices?.[0]?.message;
-      const url = msg?.images?.[0]?.imageUrl?.url || msg?.images?.[0]?.url || "";
+      let url = "";
+      if (apiKeys.openrouter) {
+        try {
+          const messages = [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                { type: "image_url", image_url: { url: imageSource } },
+              ],
+            },
+          ];
+          const result = await callOpenRouter(messages, selectedImageModel, "image", ["image", "text"]);
+          const msg = result?.choices?.[0]?.message;
+          url = msg?.images?.[0]?.imageUrl?.url || msg?.images?.[0]?.url || result?._imageUrl || "";
+        } catch (err) {
+          if (!apiKeys.hf) throw err;
+          url = await callHuggingFaceImage(`${prompt}\nUse the source image as reference.`, imageSource);
+        }
+      } else if (apiKeys.hf) {
+        url = await callHuggingFaceImage(`${prompt}\nUse the source image as reference.`, imageSource);
+      } else {
+        throw new Error("Add an OpenRouter or Hugging Face key in Settings.");
+      }
       if (!url) throw new Error("No edited image returned.");
       setImageResult(url);
     } catch (err) {
@@ -1532,7 +1631,7 @@ export default function App() {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-lg font-black">Settings</div>
-                    <div className={`text-xs ${currentTheme.muted}`}>Keys, theme, memory, and workspace controls</div>
+                    <div className={`text-xs ${currentTheme.muted}`}>Keys, fallback providers, theme, memory, and workspace controls</div>
                   </div>
                   <button onClick={() => setShowSettings(false)} className={`rounded-2xl border p-2 ${currentTheme.chip}`}>
                     <X size={18} />
@@ -1619,6 +1718,17 @@ export default function App() {
                     </div>
 
                     <div>
+                      <label className="mb-1 block text-sm font-semibold">Groq API key</label>
+                      <input
+                        type="password"
+                        value={apiKeys.groq}
+                        onChange={(e) => setApiKeys((p) => ({ ...p, groq: e.target.value }))}
+                        className={`w-full rounded-2xl border px-4 py-3 text-sm ${currentTheme.panel}`}
+                        placeholder="gsk_..."
+                      />
+                    </div>
+
+                    <div>
                       <label className="mb-1 block text-sm font-semibold">Hugging Face token</label>
                       <input
                         type="password"
@@ -1670,11 +1780,6 @@ export default function App() {
           </div>
         )}
 
-        <div className="fixed bottom-4 left-1/2 z-20 -translate-x-1/2 md:hidden">
-          <button onClick={() => setDrawerOpen(true)} className={`rounded-full border px-4 py-3 text-sm font-semibold shadow-xl ${currentTheme.panel}`}>
-            Menu
-          </button>
-        </div>
       </main>
     </div>
   );
