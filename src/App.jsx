@@ -116,6 +116,23 @@ const TRANSLATION_LANGUAGES = [
   "Russian","Japanese","Korean","Mandarin Chinese","Hindi","Arabic"
 ];
 
+const ASSISTANT_PRESETS = [
+  { key: "chatgpt", label: "ChatGPT", hint: "Balanced, polished answers" },
+  { key: "perplexity", label: "Perplexity", hint: "Fast web-first answers" },
+  { key: "gemini", label: "Gemini", hint: "Multimodal and concise" },
+  { key: "claude", label: "Claude", hint: "Careful, structured reasoning" },
+  { key: "canvas", label: "Canvas", hint: "Code and workspace focus" }
+];
+
+const OPENROUTER_IMAGE_MODELS = [
+  { slug: "google/gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image", provider: "Google", note: "Generate + edit" },
+  { slug: "openai/gpt-5-image-mini", name: "GPT-5 Image Mini", provider: "OpenAI", note: "Fast image editing" },
+  { slug: "openai/gpt-5-image", name: "GPT-5 Image", provider: "OpenAI", note: "High-quality editing" }
+];
+
+const IMAGE_ASPECTS = ["1:1", "16:9", "4:5", "3:2"];
+const IMAGE_SIZES = ["1024", "1536", "2048"];
+
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
   const s = (seconds % 60).toString().padStart(2, '0');
@@ -164,6 +181,18 @@ export default function App() {
   const [openRouterModels, setOpenRouterModels] = useState([]);
   const [openRouterStatus, setOpenRouterStatus] = useState("loading");
   const [openRouterSearch, setOpenRouterSearch] = useState("");
+
+  const [showQuickBar, setShowQuickBar] = useState(true);
+  const [assistantMode, setAssistantMode] = useState("chatgpt");
+
+  const [imageStudioOpen, setImageStudioOpen] = useState(false);
+  const [imageMode, setImageMode] = useState("generate");
+  const [imageEngine, setImageEngine] = useState("auto");
+  const [imageModel, setImageModel] = useState("google/gemini-2.5-flash-image");
+  const [imageAspect, setImageAspect] = useState("1:1");
+  const [imageSize, setImageSize] = useState("1024");
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [imageReference, setImageReference] = useState(null);
 
   // FIX #10 — dedicated settings state, no longer hijacking selectedModel
   const [showSettings,     setShowSettings]     = useState(false);
@@ -398,6 +427,51 @@ export default function App() {
     safeSetItem('gunnarz_openrouter_model_v4', modelSlug);
   }
 
+  function saveAssistantMode(mode) {
+    setAssistantMode(mode);
+    safeSetItem('gunnarz_assistant_mode_v4', mode);
+    if (mode === "perplexity") setUseLiveSearchGrounding(true);
+    if (mode === "canvas") setArtifactOpen(true);
+  }
+
+  function saveQuickBarVisibility(next) {
+    setShowQuickBar(next);
+    safeSetItem('gunnarz_show_quick_bar_v4', String(next));
+  }
+
+  function saveImageStudioPrefs(next) {
+    if (next.mode) setImageMode(next.mode);
+    if (next.engine) setImageEngine(next.engine);
+    if (next.model) setImageModel(next.model);
+    if (next.aspect) setImageAspect(next.aspect);
+    if (next.size) setImageSize(next.size);
+    safeSetItem('gunnarz_image_studio_v4', JSON.stringify({
+      mode: next.mode || imageMode,
+      engine: next.engine || imageEngine,
+      model: next.model || imageModel,
+      aspect: next.aspect || imageAspect,
+      size: next.size || imageSize
+    }));
+  }
+
+  function openImageStudio(defaultToEdit = false) {
+    const latestImage = [...attachments].reverse().find(a => a.type === 'image') || null;
+    const chosenMode = defaultToEdit || latestImage ? "edit" : "generate";
+    setImageMode(chosenMode);
+    setImageReference(latestImage?.data || null);
+    setImagePrompt(chatInput || "");
+    setImageStudioOpen(true);
+  }
+
+  function pickAssistantPrompt(mode) {
+    saveAssistantMode(mode);
+    if (mode === "canvas") setArtifactOpen(true);
+    if (mode === "perplexity") setUseLiveSearchGrounding(true);
+    if (mode === "gemini") setSelectedModel("gemini-pro");
+    if (mode === "claude") setSelectedModel("claude-max");
+    if (mode === "chatgpt") setSelectedModel("gpt-plus");
+  }
+
   async function loadOpenRouterModels() {
     setOpenRouterStatus("loading");
     try {
@@ -432,6 +506,153 @@ export default function App() {
     }
     setSelectedModel(modelKey);
     safeSetItem('gunnarz_selected_model_v4', modelKey);
+  }
+
+  function getAssistantPersonaText() {
+    if (assistantMode === "perplexity") return "Act like Perplexity: be web-first, concise, accurate, and cite sources when browsing is used.";
+    if (assistantMode === "gemini") return "Act like Gemini: be multimodal, concise, clear, and practical.";
+    if (assistantMode === "claude") return "Act like Claude: be careful, structured, nuanced, and helpful.";
+    if (assistantMode === "canvas") return "Act like a workspace builder: prefer runnable code, precise steps, and clean output that fits the canvas.";
+    return "Act like ChatGPT: be helpful, balanced, and polished.";
+  }
+
+  function getLatestImageAttachment() {
+    return [...attachments].reverse().find(a => a.type === 'image') || null;
+  }
+
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = ev => resolve(String(ev.target.result || ""));
+      reader.onerror = () => reject(new Error("Could not read image file."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function extractOpenRouterImageUrl(result) {
+    const msg = result?.choices?.[0]?.message;
+    const direct = msg?.images?.[0]?.imageUrl?.url || msg?.images?.[0]?.url;
+    if (direct) return direct;
+    if (typeof msg?.content === 'string' && msg.content.startsWith('data:image/')) return msg.content;
+    return "";
+  }
+
+  async function handleImageReferencePick(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      addToast('error', 'Pick an image file.');
+      return;
+    }
+    const dataUrl = await fileToDataUrl(file);
+    setImageReference(dataUrl);
+    setImageMode('edit');
+    setImageStudioOpen(true);
+  }
+
+  async function runImageStudio(e) {
+    e?.preventDefault?.();
+    const prompt = (imagePrompt || chatInput || "").trim();
+    const hasReference = Boolean(imageReference);
+    const resolvedEngine = imageEngine === 'auto'
+      ? (keys.openrouter ? 'openrouter' : 'huggingface')
+      : imageEngine;
+
+    if (imageMode === 'edit' && !hasReference) {
+      addToast('error', 'Add a reference image first for editing.');
+      return;
+    }
+    if (!prompt) {
+      addToast('error', 'Enter an image prompt.');
+      return;
+    }
+
+    setIsTyping(true);
+    setThinkingSteps([
+      imageMode === 'edit' ? 'Preparing image edit…' : 'Preparing image generation…',
+      resolvedEngine === 'openrouter' ? 'Routing through OpenRouter…' : 'Using fallback image engine…'
+    ]);
+    try {
+      let imageUrl = "";
+
+      if (resolvedEngine === 'openrouter' && keys.openrouter) {
+        const modelToUse = imageModel || 'google/gemini-2.5-flash-image';
+        const messages = imageMode === 'edit'
+          ? [{
+              role: 'user',
+              content: [
+                { type: 'text', text: `Edit this image using these instructions: ${prompt}` },
+                { type: 'image_url', image_url: { url: imageReference } }
+              ]
+            }]
+          : [{ role: 'user', content: prompt }];
+
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${keys.openrouter}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://gunnarz-ai.netlify.app',
+            'X-Title': 'Gunnarz AI OS'
+          },
+          body: JSON.stringify({
+            model: modelToUse,
+            messages,
+            modalities: ['image', 'text'],
+            image_config: {
+              aspect_ratio: imageAspect,
+              size: imageSize
+            },
+            stream: false
+          })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error?.message || 'OpenRouter image request failed.');
+        }
+
+        const data = await response.json();
+        imageUrl = extractOpenRouterImageUrl(data);
+        if (!imageUrl) throw new Error('No image returned from OpenRouter.');
+      } else {
+        if (!keys.hf) throw new Error('OpenRouter or Hugging Face image access is required.');
+        if (imageMode === 'edit') {
+          throw new Error('Image editing is available through OpenRouter image models in this build.');
+        }
+        const res = await fetch("https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${keys.hf}` },
+          body: JSON.stringify({ inputs: prompt })
+        });
+        if (!res.ok) throw new Error("Image generation failed. Check your image token.");
+        imageUrl = URL.createObjectURL(await res.blob());
+      }
+
+      updateSessions(prev => prev.map(s =>
+        s.id === activeSessionIdRef.current
+          ? {
+              ...s,
+              messages: [
+                ...s.messages,
+                { role: 'user', content: imageMode === 'edit' ? `🖼️ Edit this image: ${prompt}` : `🎨 Draw: "${prompt}"` },
+                { role: 'assistant', content: `![Generated Art](${imageUrl})` }
+              ]
+            }
+          : s
+      ));
+      setChatInput('');
+      setImagePrompt('');
+      setImageStudioOpen(false);
+      setAttachments([]);
+      addToast('success', imageMode === 'edit' ? 'Image edit complete.' : 'Image generated.');
+    } catch (err) {
+      addToast('error', err.message);
+    } finally {
+      setThinkingSteps([]);
+      setIsTyping(false);
+    }
   }
 
   // ──────────────────────────────────────────
@@ -614,6 +835,7 @@ export default function App() {
       role: 'system',
       content: [
         `You are Gunnarz AI OS V30 Singularity, an elite AI assistant exclusively built by Gunnarz.`,
+        getAssistantPersonaText(),
         memoryContext,
         `Format beautifully with markdown. Put executable HTML/CSS/JS code inside \`\`\`html blocks so users can hit Run immediately.`
       ].filter(Boolean).join('\n')
@@ -824,30 +1046,8 @@ export default function App() {
   // 8. IMAGE GEN & VOICE
   // ──────────────────────────────────────────
   async function handleImageGeneration(e) {
-    e.preventDefault();
-    if (!chatInput.trim() || isTyping) return;
-    if (!keys.hf) { addToast('error', "Hugging Face token needed in Settings."); return; }
-    const prompt = chatInput;
-    setChatInput('');
-    setIsTyping(true);
-    if (deepThinking) { setThinkingSteps(["Accessing FLUX.1…", "Generating latent vectors…"]); await new Promise(r => setTimeout(r, 800)); }
-    try {
-      const res = await fetch("https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell", {
-        method: "POST", headers: { Authorization: `Bearer ${keys.hf}` }, body: JSON.stringify({ inputs: prompt })
-      });
-      if (!res.ok) throw new Error("Image generation failed. Check HF token.");
-      const imgUrl = URL.createObjectURL(await res.blob());
-      updateSessions(prev => prev.map(s =>
-        s.id === activeSessionIdRef.current
-          ? { ...s, messages: [...s.messages,
-              { role: 'user',      content: `🎨 Draw: "${prompt}"` },
-              { role: 'assistant', content: `![Generated Art](${imgUrl})` }
-            ]}
-          : s
-      ));
-    } catch (err) { addToast('error', err.message); }
-    setThinkingSteps([]);
-    setIsTyping(false);
+    e?.preventDefault?.();
+    await runImageStudio(e);
   }
 
   // FIX #3 + FIX #20 — voice with mic level visualizer
@@ -1205,6 +1405,24 @@ export default function App() {
     const savedORModel = safeGetItem('gunnarz_openrouter_model_v4');
     if (savedORModel) setCustomORModel(savedORModel);
 
+    const savedAssistant = safeGetItem('gunnarz_assistant_mode_v4');
+    if (savedAssistant && ASSISTANT_PRESETS.some(p => p.key === savedAssistant)) setAssistantMode(savedAssistant);
+
+    const savedQuickBar = safeGetItem('gunnarz_show_quick_bar_v4');
+    if (savedQuickBar !== null) setShowQuickBar(savedQuickBar !== 'false');
+
+    const savedImageStudio = safeGetItem('gunnarz_image_studio_v4');
+    if (savedImageStudio) {
+      try {
+        const parsed = JSON.parse(savedImageStudio);
+        if (parsed.mode) setImageMode(parsed.mode);
+        if (parsed.engine) setImageEngine(parsed.engine);
+        if (parsed.model) setImageModel(parsed.model);
+        if (parsed.aspect) setImageAspect(parsed.aspect);
+        if (parsed.size) setImageSize(parsed.size);
+      } catch {}
+    }
+
     const savedPin = safeGetItem('gunnarz_app_pin');
     if (savedPin) { setAppLocked(true); setAppPin(savedPin); }
 
@@ -1242,10 +1460,19 @@ export default function App() {
 
   useEffect(() => {
     safeSetItem('gunnarz_selected_model_v4', selectedModel);
+    safeSetItem('gunnarz_assistant_mode_v4', assistantMode);
+    safeSetItem('gunnarz_show_quick_bar_v4', String(showQuickBar));
+    safeSetItem('gunnarz_image_studio_v4', JSON.stringify({
+      mode: imageMode,
+      engine: imageEngine,
+      model: imageModel,
+      aspect: imageAspect,
+      size: imageSize
+    }));
     if (selectedModel === 'open-router') {
       safeSetItem('gunnarz_openrouter_model_v4', customORModel);
     }
-  }, [selectedModel, customORModel]);
+  }, [selectedModel, customORModel, assistantMode, showQuickBar, imageMode, imageEngine, imageModel, imageAspect, imageSize]);
 
   // ──────────────────────────────────────────
   // 11. RENDER HELPERS
@@ -1563,6 +1790,34 @@ export default function App() {
               ))}
             </div>
 
+            {showQuickBar && (
+              <div className="px-3 py-2 border-b border-white/10 bg-black/25 flex flex-wrap gap-2 items-center">
+                <span className="text-[10px] uppercase tracking-[0.25em] text-gray-500 font-black mr-1">Modes</span>
+                {ASSISTANT_PRESETS.map(p => (
+                  <button
+                    key={p.key}
+                    onClick={() => pickAssistantPrompt(p.key)}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-bold border ${assistantMode === p.key ? `bg-white/10 ${themeStyles.accent} border-white/20` : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'}`}
+                    title={p.hint}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+                <button onClick={() => { setUseLiveSearchGrounding(true); pickAssistantPrompt("perplexity"); }}
+                  className={`px-3 py-1.5 rounded-full text-[10px] font-bold border ${useLiveSearchGrounding ? `bg-white/10 ${themeStyles.accent} border-white/20` : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'}`}>
+                  Perplexity Web
+                </button>
+                <button onClick={() => { pickAssistantPrompt("canvas"); setArtifactOpen(true); }}
+                  className="px-3 py-1.5 rounded-full text-[10px] font-bold border bg-black/40 border-white/10 text-gray-400 hover:text-white">
+                  Canvas
+                </button>
+                <button onClick={() => setModelLibraryOpen(true)}
+                  className="px-3 py-1.5 rounded-full text-[10px] font-bold border bg-black/40 border-white/10 text-gray-400 hover:text-white">
+                  Open Suite
+                </button>
+              </div>
+            )}
+
             {comparisonActive ? (
               /* ── Comparison view ── */
               <div className="flex-1 grid grid-cols-2 gap-4 p-4 overflow-y-auto">
@@ -1742,12 +1997,147 @@ export default function App() {
                     <Send size={16}/>
                   </button>
                 </form>
-                <button onClick={handleImageGeneration} className="p-3 rounded-xl bg-black/30 border border-white/10 text-gray-400 hover:text-purple-400" title="Generate Art">
+                <button onClick={() => openImageStudio(Boolean(getLatestImageAttachment()))} className="p-3 rounded-xl bg-black/30 border border-white/10 text-gray-400 hover:text-purple-400" title="Generate or edit image">
                   <ImageIcon size={18}/>
                 </button>
               </div>
             </div>
           </div>
+
+
+          {imageStudioOpen && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xl flex items-center justify-center p-4">
+              <div className="w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-3xl border border-white/10 bg-[#070716] shadow-2xl flex flex-col">
+                <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between bg-black/40">
+                  <div>
+                    <div className="text-sm font-bold text-white">Image Studio</div>
+                    <div className="text-[10px] text-gray-500">Text-to-image and image-to-image editing</div>
+                  </div>
+                  <button onClick={() => setImageStudioOpen(false)} className="text-red-400"><X size={18}/></button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_.8fr] min-h-0 flex-1">
+                  <form onSubmit={runImageStudio} className="p-4 space-y-4 overflow-y-auto">
+                    <div className="flex gap-2 flex-wrap">
+                      {[{k:'generate', l:'Generate'}, {k:'edit', l:'Edit'}].map(t => (
+                        <button
+                          key={t.k}
+                          type="button"
+                          onClick={() => { setImageMode(t.k); saveImageStudioPrefs({ mode: t.k }); }}
+                          className={`px-3 py-1.5 rounded-full text-xs font-bold border ${imageMode === t.k ? `bg-white/10 ${themeStyles.accent} border-white/20` : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'}`}
+                        >
+                          {t.l}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-black uppercase text-gray-400 mb-1.5">Engine</label>
+                        <select value={imageEngine} onChange={e => { setImageEngine(e.target.value); saveImageStudioPrefs({ engine: e.target.value }); }} className="w-full bg-[#050511] border border-white/10 rounded-xl p-3 text-xs text-white outline-none">
+                          <option value="auto">Auto (OpenRouter first)</option>
+                          <option value="openrouter">OpenRouter</option>
+                          <option value="huggingface">Hugging Face</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black uppercase text-gray-400 mb-1.5">Model</label>
+                        <select value={imageModel} onChange={e => { setImageModel(e.target.value); saveImageStudioPrefs({ model: e.target.value }); }} className="w-full bg-[#050511] border border-white/10 rounded-xl p-3 text-xs text-white outline-none">
+                          {OPENROUTER_IMAGE_MODELS.map(m => <option key={m.slug} value={m.slug}>{m.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-black uppercase text-gray-400 mb-1.5">Aspect ratio</label>
+                        <select value={imageAspect} onChange={e => { setImageAspect(e.target.value); saveImageStudioPrefs({ aspect: e.target.value }); }} className="w-full bg-[#050511] border border-white/10 rounded-xl p-3 text-xs text-white outline-none">
+                          {IMAGE_ASPECTS.map(a => <option key={a} value={a}>{a}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black uppercase text-gray-400 mb-1.5">Size</label>
+                        <select value={imageSize} onChange={e => { setImageSize(e.target.value); saveImageStudioPrefs({ size: e.target.value }); }} className="w-full bg-[#050511] border border-white/10 rounded-xl p-3 text-xs text-white outline-none">
+                          {IMAGE_SIZES.map(a => <option key={a} value={a}>{a}px</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-gray-400 mb-1.5">Prompt</label>
+                      <textarea
+                        value={imagePrompt}
+                        onChange={e => setImagePrompt(e.target.value)}
+                        placeholder={imageMode === 'edit' ? 'Describe exactly how to change the reference image…' : 'Describe the image you want…'}
+                        className="w-full h-40 bg-[#050511] border border-white/10 rounded-2xl p-3 text-sm text-white outline-none resize-none"
+                      />
+                    </div>
+
+                    {imageMode === 'edit' && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[10px] font-black uppercase text-gray-400">Reference image</label>
+                          <div className="flex gap-2">
+                            <label className="px-3 py-1.5 rounded-full text-[10px] font-bold border bg-black/40 border-white/10 text-gray-400 hover:text-white cursor-pointer">
+                              Upload
+                              <input type="file" accept="image/*" onChange={handleImageReferencePick} className="hidden" />
+                            </label>
+                            <button type="button" onClick={() => { const latest = getLatestImageAttachment(); if (latest) setImageReference(latest.data); }} className="px-3 py-1.5 rounded-full text-[10px] font-bold border bg-black/40 border-white/10 text-gray-400 hover:text-white">
+                              Use last chat image
+                            </button>
+                          </div>
+                        </div>
+                        {imageReference ? (
+                          <img src={imageReference} alt="Reference" className="w-full max-h-64 object-contain rounded-2xl border border-white/10 bg-black" />
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-white/15 bg-black/30 p-8 text-center text-xs text-gray-500">
+                            Add a reference image to enable editing.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <button type="submit" className={`flex-1 py-3 rounded-2xl text-sm font-bold ${themeStyles.button}`}>
+                        {imageMode === 'edit' ? 'Edit Image' : 'Generate Image'}
+                      </button>
+                      <button type="button" onClick={() => { setImageStudioOpen(false); setImagePrompt(''); }} className="px-4 py-3 rounded-2xl bg-black/40 border border-white/10 text-gray-300 hover:text-white text-sm font-bold">
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="border-t lg:border-t-0 lg:border-l border-white/10 bg-black/30 p-4 overflow-y-auto space-y-4">
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-wider text-gray-400 mb-2">OpenRouter image models</div>
+                      <div className="space-y-2">
+                        {OPENROUTER_IMAGE_MODELS.map(m => (
+                          <button
+                            key={m.slug}
+                            type="button"
+                            onClick={() => { setImageModel(m.slug); setImageEngine('openrouter'); saveImageStudioPrefs({ model: m.slug, engine: 'openrouter' }); }}
+                            className={`w-full text-left p-3 rounded-2xl border ${imageModel === m.slug ? `bg-[#bf5af2]/10 border-[#bf5af2]/40 text-white` : 'bg-black/30 border-white/10 text-gray-300 hover:border-white/20'}`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold text-sm truncate">{m.name}</span>
+                              <span className="text-[10px] text-gray-500 whitespace-nowrap">{m.provider}</span>
+                            </div>
+                            <div className="mt-1 text-[10px] text-gray-500">{m.note}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/30 p-3 text-xs text-gray-400 space-y-2">
+                      <div className="font-bold text-white">What this does</div>
+                      <div>Generate uses the prompt alone. Edit uses a prompt plus the uploaded or attached reference image.</div>
+                      <div>If OpenRouter is available, the image request routes there first; otherwise the app falls back to Hugging Face for generation.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── WORKSPACE CANVAS ── */}
           {artifactOpen && (
@@ -2115,6 +2505,45 @@ export default function App() {
                   className={`px-3 py-1 text-[10px] font-bold uppercase rounded-lg border ${isIncognito ? 'bg-purple-500/20 text-purple-400 border-purple-500/40' : 'bg-black text-gray-500 border-transparent'}`}>
                   {isIncognito ? 'On' : 'Off'}
                 </button>
+              </div>
+
+              <div className="border-t border-white/10 pt-3 flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Quick Utility Bar</span>
+                <button onClick={() => saveQuickBarVisibility(!showQuickBar)}
+                  className={`px-3 py-1 text-[10px] font-bold uppercase rounded-lg border ${showQuickBar ? 'bg-white/10 text-white border-white/20' : 'bg-black text-gray-500 border-transparent'}`}>
+                  {showQuickBar ? 'Shown' : 'Hidden'}
+                </button>
+              </div>
+
+              <div className="border-t border-white/10 pt-3">
+                <span className="block text-[10px] font-black uppercase text-gray-400 mb-2">Image Studio Defaults</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <select value={imageMode} onChange={e => { setImageMode(e.target.value); saveImageStudioPrefs({ mode: e.target.value }); }}
+                    className="bg-black/40 border border-white/10 rounded-lg p-2 text-xs text-white outline-none">
+                    <option value="generate">Generate</option>
+                    <option value="edit">Edit</option>
+                  </select>
+                  <select value={imageEngine} onChange={e => { setImageEngine(e.target.value); saveImageStudioPrefs({ engine: e.target.value }); }}
+                    className="bg-black/40 border border-white/10 rounded-lg p-2 text-xs text-white outline-none">
+                    <option value="auto">Auto</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="huggingface">Hugging Face</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <select value={imageModel} onChange={e => { setImageModel(e.target.value); saveImageStudioPrefs({ model: e.target.value }); }}
+                    className="bg-black/40 border border-white/10 rounded-lg p-2 text-xs text-white outline-none">
+                    {OPENROUTER_IMAGE_MODELS.map(m => <option key={m.slug} value={m.slug}>{m.name}</option>)}
+                  </select>
+                  <select value={imageAspect} onChange={e => { setImageAspect(e.target.value); saveImageStudioPrefs({ aspect: e.target.value }); }}
+                    className="bg-black/40 border border-white/10 rounded-lg p-2 text-xs text-white outline-none">
+                    {IMAGE_ASPECTS.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+                <select value={imageSize} onChange={e => { setImageSize(e.target.value); saveImageStudioPrefs({ size: e.target.value }); }}
+                  className="mt-2 w-full bg-black/40 border border-white/10 rounded-lg p-2 text-xs text-white outline-none">
+                  {IMAGE_SIZES.map(a => <option key={a} value={a}>{a}px</option>)}
+                </select>
               </div>
 
               <div className="border-t border-white/10 pt-3">
