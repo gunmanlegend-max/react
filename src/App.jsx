@@ -1,4 +1,3 @@
-
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Menu,
@@ -37,7 +36,8 @@ import {
   PanelLeftOpen,
   ChevronLeft,
   ChevronRight,
-  Database
+  Database,
+  Square // Added for the Stop button
 } from "lucide-react";
 
 const APP_NAME = "Gunnarz AI OS";
@@ -255,10 +255,18 @@ function renderRichText(text, copyKey, onCopy, accentClass = "text-emerald-400")
               </div>
             );
           }
-          const cleaned = line
+          
+          // XSS FIX: Escape HTML characters *before* applying markdown regex
+          const safeLine = line
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+            
+          const cleaned = safeLine
             .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
             .replace(/\*(.*?)\*/g, "<em>$1</em>")
             .replace(/`(.*?)`/g, "<code class='rounded bg-white/10 px-1 py-0.5 text-[12px]'>$1</code>");
+            
           return (
             <div key={lineIdx} dangerouslySetInnerHTML={{ __html: cleaned || "&nbsp;" }} />
           );
@@ -297,6 +305,8 @@ export default function App() {
   const [attachments, setAttachments] = useState([]);
   const [streamed, setStreamed] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [abortController, setAbortController] = useState(null); // Added AbortController state
+  
   const [copiedId, setCopiedId] = useState("");
   const [promptChip, setPromptChip] = useState("");
   const [modelSearch, setModelSearch] = useState("");
@@ -610,7 +620,8 @@ export default function App() {
     return map.find(([needle]) => String(selectedModel).includes(needle))?.[1] || "llama-3.3-70b-versatile";
   }
 
-  async function callGroq(messages, model = pickGroqModel()) {
+  // API calls updated to accept AbortSignal
+  async function callGroq(messages, model = pickGroqModel(), signal) {
     if (!apiKeys.groq) throw new Error("Add your Groq key in Settings.");
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -624,13 +635,14 @@ export default function App() {
         temperature: 0.7,
         max_tokens: 2048,
       }),
+      signal, // Attach signal
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data?.error?.message || "Groq request failed.");
     return data;
   }
 
-  async function callHuggingFaceImage(prompt, sourceImage = "") {
+  async function callHuggingFaceImage(prompt, sourceImage = "", signal) {
     if (!apiKeys.hf) throw new Error("Add your Hugging Face token in Settings.");
     const model = "black-forest-labs/FLUX.1-schnell";
     const payload = sourceImage
@@ -643,6 +655,7 @@ export default function App() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+      signal,
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
@@ -652,7 +665,7 @@ export default function App() {
     return URL.createObjectURL(blob);
   }
 
-  async function callOpenRouter(messages, model, modalType = "text", imageModalities = ["text"]) {
+  async function callOpenRouter(messages, model, modalType = "text", imageModalities = ["text"], signal) {
     if (!apiKeys.openrouter) throw new Error("Add your OpenRouter key in Settings.");
 
     const body = {
@@ -674,6 +687,7 @@ export default function App() {
         "X-Title": APP_NAME,
       },
       body: JSON.stringify(body),
+      signal, // Attach signal
     });
 
     const data = await res.json().catch(() => ({}));
@@ -681,7 +695,7 @@ export default function App() {
       const message = data?.error?.message || "OpenRouter request failed.";
       const rateLimited = isRateLimitLikeError(message) || res.status === 429;
       if (rateLimited && modalType === "text" && apiKeys.groq) {
-        return { ...await callGroq(messages), _fallback: "groq" };
+        return { ...await callGroq(messages, pickGroqModel(), signal), _fallback: "groq" };
       }
       if (rateLimited && modalType === "image" && apiKeys.hf) {
         const lastContent = messages[messages.length - 1]?.content;
@@ -689,7 +703,7 @@ export default function App() {
         const sourceImage = Array.isArray(lastContent)
           ? (lastContent.find((p) => p?.type === "image_url")?.image_url?.url || "")
           : "";
-        return { _fallback: "hf-image", _imageUrl: await callHuggingFaceImage(prompt, sourceImage) };
+        return { _fallback: "hf-image", _imageUrl: await callHuggingFaceImage(prompt, sourceImage, signal) };
       }
       throw new Error(message);
     }
@@ -704,6 +718,13 @@ export default function App() {
       role: "system",
       content: `${TONES[tone] || TONES.balanced}${memoryBlock}`,
     };
+  }
+
+  // Cancel generation handler
+  function stopGeneration() {
+    if (abortController) {
+      abortController.abort();
+    }
   }
 
   async function sendMessage(textOverride = "") {
@@ -725,6 +746,10 @@ export default function App() {
     setAttachments([]);
     setIsTyping(true);
     setStreamed("");
+
+    // Initialize Abort Controller for the request
+    const controller = new AbortController();
+    setAbortController(controller);
 
     try {
       let reply = "";
@@ -762,10 +787,10 @@ export default function App() {
       }
 
       if (apiKeys.openrouter) {
-        const result = await callOpenRouter(conversation, selectedModel, "text");
+        const result = await callOpenRouter(conversation, selectedModel, "text", ["text"], controller.signal);
         reply = result?.choices?.[0]?.message?.content || "No response returned.";
       } else if (apiKeys.groq) {
-        const result = await callGroq(conversation);
+        const result = await callGroq(conversation, pickGroqModel(), controller.signal);
         reply = result?.choices?.[0]?.message?.content || "No response returned.";
       } else {
         reply = "Add an OpenRouter or Groq key in Settings, then pick a model and send again.";
@@ -786,7 +811,13 @@ export default function App() {
       const estimatedTokens = Math.ceil((userText.length + reply.length) / 4);
       setStats((prev) => ({ tokens: prev.tokens + estimatedTokens, chats: sessions.length }));
     } catch (err) {
-      const reply = `Error: ${err.message}`;
+      let reply = "";
+      if (err.name === 'AbortError') {
+        reply = "Generation stopped by user.";
+      } else {
+        reply = `Error: ${err.message}`;
+      }
+      
       updateSession(session.id, (s) => ({
         ...s,
         messages: [...s.messages, { id: uid("msg"), role: "assistant", content: reply }],
@@ -794,6 +825,7 @@ export default function App() {
       setStreamed(reply);
     } finally {
       setIsTyping(false);
+      setAbortController(null);
     }
   }
 
@@ -801,30 +833,38 @@ export default function App() {
     const prompt = imagePrompt.trim();
     if (!prompt || imageBusy) return;
     setImageBusy(true);
+    
+    const controller = new AbortController();
+    setAbortController(controller);
+    
     try {
       let url = "";
       if (apiKeys.openrouter) {
         try {
           const messages = [{ role: "user", content: prompt }];
-          const result = await callOpenRouter(messages, selectedImageModel, "image", ["image"]);
+          const result = await callOpenRouter(messages, selectedImageModel, "image", ["image"], controller.signal);
           const msg = result?.choices?.[0]?.message;
           url = msg?.images?.[0]?.imageUrl?.url || msg?.images?.[0]?.url || result?._imageUrl || "";
         } catch (err) {
+          if (err.name === 'AbortError') throw err;
           if (!apiKeys.hf) throw err;
-          url = await callHuggingFaceImage(prompt);
+          url = await callHuggingFaceImage(prompt, "", controller.signal);
         }
       } else if (apiKeys.hf) {
-        url = await callHuggingFaceImage(prompt);
+        url = await callHuggingFaceImage(prompt, "", controller.signal);
       } else {
         throw new Error("Add an OpenRouter or Hugging Face key in Settings.");
       }
       if (!url) throw new Error("No image returned by the model.");
       setImageResult(url);
     } catch (err) {
-      setImageResult("");
-      throw err;
+      if (err.name !== 'AbortError') {
+         setImageResult("");
+         alert(err.message);
+      }
     } finally {
       setImageBusy(false);
+      setAbortController(null);
     }
   }
 
@@ -835,6 +875,10 @@ export default function App() {
       throw new Error("Upload or paste a source image first.");
     }
     setImageBusy(true);
+    
+    const controller = new AbortController();
+    setAbortController(controller);
+    
     try {
       let url = "";
       if (apiKeys.openrouter) {
@@ -848,25 +892,29 @@ export default function App() {
               ],
             },
           ];
-          const result = await callOpenRouter(messages, selectedImageModel, "image", ["image", "text"]);
+          const result = await callOpenRouter(messages, selectedImageModel, "image", ["image", "text"], controller.signal);
           const msg = result?.choices?.[0]?.message;
           url = msg?.images?.[0]?.imageUrl?.url || msg?.images?.[0]?.url || result?._imageUrl || "";
         } catch (err) {
+          if (err.name === 'AbortError') throw err;
           if (!apiKeys.hf) throw err;
-          url = await callHuggingFaceImage(`${prompt}\nUse the source image as reference.`, imageSource);
+          url = await callHuggingFaceImage(`${prompt}\nUse the source image as reference.`, imageSource, controller.signal);
         }
       } else if (apiKeys.hf) {
-        url = await callHuggingFaceImage(`${prompt}\nUse the source image as reference.`, imageSource);
+        url = await callHuggingFaceImage(`${prompt}\nUse the source image as reference.`, imageSource, controller.signal);
       } else {
         throw new Error("Add an OpenRouter or Hugging Face key in Settings.");
       }
       if (!url) throw new Error("No edited image returned.");
       setImageResult(url);
     } catch (err) {
-      setImageResult("");
-      throw err;
+      if (err.name !== 'AbortError') {
+         setImageResult("");
+         alert(err.message);
+      }
     } finally {
       setImageBusy(false);
+      setAbortController(null);
     }
   }
 
@@ -1303,12 +1351,24 @@ export default function App() {
                     className="max-h-40 flex-1 resize-none bg-transparent px-2 py-3 text-sm outline-none"
                   />
 
-                  <button
-                    onClick={() => sendMessage()}
-                    className={`rounded-[20px] px-4 py-3 text-sm font-bold ${currentTheme.accentBg}`}
-                  >
-                    <Send size={18} />
-                  </button>
+                  {/* Submit / Cancel Button Logic */}
+                  {isTyping ? (
+                    <button
+                      onClick={stopGeneration}
+                      title="Stop generating"
+                      className="rounded-[20px] px-4 py-3 text-sm font-bold bg-red-500/20 text-red-500 hover:bg-red-500/30"
+                    >
+                      <Square size={18} fill="currentColor" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => sendMessage()}
+                      title="Send message"
+                      className={`rounded-[20px] px-4 py-3 text-sm font-bold ${currentTheme.accentBg}`}
+                    >
+                      <Send size={18} />
+                    </button>
+                  )}
                 </div>
 
                 {attachments.length ? (
