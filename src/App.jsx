@@ -37,7 +37,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
-  Square // Added for the Stop button
+  Square, // Added for the Stop button
+  CopyPlus, // Added for cloning
+  DownloadCloud, // Added for downloads
+  RefreshCw // Added for regeneration
 } from "lucide-react";
 
 const APP_NAME = "Gunnarz AI OS";
@@ -306,6 +309,7 @@ export default function App() {
   const [streamed, setStreamed] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [abortController, setAbortController] = useState(null); // Added AbortController state
+  const [isListening, setIsListening] = useState(false); // Added for Voice Input
   
   const [copiedId, setCopiedId] = useState("");
   const [promptChip, setPromptChip] = useState("");
@@ -339,6 +343,7 @@ export default function App() {
   const imageInputRef = useRef(null);
   const drawerRef = useRef(null);
   const chatEndRef = useRef(null);
+  const recognitionRef = useRef(null); // Added for Voice Input
 
   const currentTheme = THEME_PRESETS[theme] || THEME_PRESETS.cyber;
 
@@ -727,6 +732,32 @@ export default function App() {
     }
   }
 
+  // Voice Input Handler
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser. Try Chrome or Safari.");
+      return;
+    }
+    const rec = new SpeechRecognition();
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.onstart = () => setIsListening(true);
+    rec.onresult = (e) => {
+      const transcript = e.results[0][0].transcript;
+      setComposer((prev) => (prev ? prev + " " + transcript : transcript));
+    };
+    rec.onerror = () => setIsListening(false);
+    rec.onend = () => setIsListening(false);
+    rec.start();
+    recognitionRef.current = rec;
+  };
+
   async function sendMessage(textOverride = "") {
     const session = ensureSession();
     const rawText = String(textOverride || composer).trim();
@@ -980,6 +1011,120 @@ export default function App() {
 
   const activeCanvas = canvasTabs.find((t) => t.id === activeCanvasTab) || canvasTabs[0];
 
+  // --- NEW PREMIUM FEATURES ---
+  function cloneActiveCanvas() {
+    if (!activeCanvas) return;
+    const newTab = { ...activeCanvas, id: uid("tab"), name: `${activeCanvas.name} (Copy)` };
+    setCanvasTabs((prev) => [...prev, newTab]);
+    setActiveCanvasTab(newTab.id);
+  }
+
+  function downloadCanvasHtml() {
+    const doc = runCanvasTab();
+    const blob = new Blob([doc], { type: "text/html" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${activeCanvas?.name || "gunnarz-canvas"}.html`;
+    a.click();
+  }
+
+  async function downloadResultImage() {
+    if (!imageResult) return;
+    try {
+      const res = await fetch(imageResult);
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `gunnarz-image-${Date.now()}.png`;
+      a.click();
+    } catch (e) {
+      const a = document.createElement("a");
+      a.href = imageResult;
+      a.download = `gunnarz-image-${Date.now()}.png`;
+      a.target = "_blank";
+      a.click();
+    }
+  }
+
+  const handleCodeKeyDown = (e, setter, field) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = e.target.selectionStart;
+      const end = e.target.selectionEnd;
+      const val = e.target.value;
+      const newVal = val.substring(0, start) + "  " + val.substring(end);
+      
+      setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, [field]: newVal } : t));
+      
+      setTimeout(() => {
+        e.target.selectionStart = e.target.selectionEnd = start + 2;
+      }, 0);
+    }
+  };
+
+  async function regenerateResponse() {
+    const session = ensureSession();
+    if (session.messages.length < 2) return;
+    const lastMsg = session.messages[session.messages.length - 1];
+    if (lastMsg.role !== "assistant") return;
+
+    const prevMessages = session.messages.slice(0, -1);
+    updateSession(session.id, (s) => ({ ...s, messages: prevMessages }));
+    
+    setIsTyping(true);
+    setStreamed("");
+    const controller = new AbortController();
+    setAbortController(controller);
+
+    try {
+      let reply = "";
+      const conversation = [
+        sessionSystemPrompt(),
+        ...prevMessages.map((m) => ({
+          role: m.role,
+          content: toPlainText(m.content),
+        })),
+      ];
+
+      if (liveSearchMode || selectedModel.includes("perplexity")) {
+        conversation[0] = {
+          role: "system",
+          content: `${TONES.perplexity}\nUse concise grounded answers. If a claim is uncertain, say so.`,
+        };
+      }
+
+      if (apiKeys.openrouter) {
+        const result = await callOpenRouter(conversation, selectedModel, "text", ["text"], controller.signal);
+        reply = result?.choices?.[0]?.message?.content || "No response returned.";
+      } else if (apiKeys.groq) {
+        const result = await callGroq(conversation, pickGroqModel(), controller.signal);
+        reply = result?.choices?.[0]?.message?.content || "No response returned.";
+      } else {
+        reply = "Add an OpenRouter or Groq key in Settings, then pick a model and send again.";
+      }
+
+      setStreamed(reply);
+      updateSession(session.id, (s) => ({
+        ...s,
+        messages: [...s.messages, { id: uid("msg"), role: "assistant", content: reply }],
+      }));
+
+      const htmlMatch = reply.match(/```html\s*([\s\S]*?)```/);
+      if (htmlMatch?.[1]) openCanvasFromHtml(htmlMatch[1].trim());
+      
+    } catch (err) {
+      let reply = err.name === 'AbortError' ? "Generation stopped by user." : `Error: ${err.message}`;
+      updateSession(session.id, (s) => ({
+        ...s,
+        messages: [...s.messages, { id: uid("msg"), role: "assistant", content: reply }],
+      }));
+      setStreamed(reply);
+    } finally {
+      setIsTyping(false);
+      setAbortController(null);
+    }
+  }
+
   return (
     <div className={`flex h-screen overflow-hidden ${currentTheme.root}`}>
       <input ref={fileInputRef} onChange={handleFilePick} type="file" className="hidden" />
@@ -1220,8 +1365,9 @@ export default function App() {
           <section className="flex min-h-0 flex-1 flex-col">
             <div className="flex-1 overflow-y-auto px-3 py-4 md:px-6">
               <div className="mx-auto max-w-4xl space-y-4">
-                {currentMessages.map((msg) => {
+                {currentMessages.map((msg, index) => {
                   const isUser = msg.role === "user";
+                  const isLastMessage = index === currentMessages.length - 1;
                   return (
                     <div key={msg.id} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
                       <div className={`max-w-[92%] rounded-3xl border px-4 py-3 shadow-sm md:max-w-[82%] ${isUser ? "border-white/10 bg-white/6" : "border-white/10 bg-white/4"}`}>
@@ -1230,6 +1376,11 @@ export default function App() {
                             {isUser ? "You" : "Gunnarz"}
                           </div>
                           <div className="flex items-center gap-2">
+                            {!isUser && isLastMessage && (
+                              <button onClick={regenerateResponse} title="Regenerate" className="opacity-70 hover:opacity-100 hover:text-emerald-400">
+                                <RefreshCw size={14} />
+                              </button>
+                            )}
                             {!isUser && (
                               <button onClick={() => copyText(toPlainText(msg.content), msg.id)} className="opacity-70 hover:opacity-100">
                                 {copiedId === msg.id ? <CheckCheck size={14} /> : <Copy size={14} />}
@@ -1336,6 +1487,13 @@ export default function App() {
                   >
                     <Wand2 size={18} />
                   </button>
+                  <button
+                    onClick={toggleListening}
+                    className={`rounded-2xl border p-3 ${isListening ? 'text-red-500 animate-pulse bg-red-500/10 border-red-500/30' : currentTheme.chip}`}
+                    title="Voice input"
+                  >
+                    <Mic size={18} />
+                  </button>
 
                   <textarea
                     value={composer}
@@ -1416,29 +1574,35 @@ export default function App() {
                         {tab.name}
                       </button>
                     ))}
+                    <button onClick={cloneActiveCanvas} title="Clone active tab" className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip} hover:text-white`}>
+                      <CopyPlus size={14} className="inline" /> Clone
+                    </button>
                   </div>
 
                   <div className="space-y-3">
                     <textarea
                       value={activeCanvas?.html || ""}
                       onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, html: e.target.value } : t))}
+                      onKeyDown={(e) => handleCodeKeyDown(e, null, 'html')}
                       rows={8}
                       placeholder="HTML"
-                      className={`w-full rounded-2xl border p-3 text-sm outline-none ${currentTheme.panel2}`}
+                      className={`w-full font-mono rounded-2xl border p-3 text-sm outline-none ${currentTheme.panel2}`}
                     />
                     <textarea
                       value={activeCanvas?.css || ""}
                       onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, css: e.target.value } : t))}
+                      onKeyDown={(e) => handleCodeKeyDown(e, null, 'css')}
                       rows={6}
                       placeholder="CSS"
-                      className={`w-full rounded-2xl border p-3 text-sm outline-none ${currentTheme.panel2}`}
+                      className={`w-full font-mono rounded-2xl border p-3 text-sm outline-none ${currentTheme.panel2}`}
                     />
                     <textarea
                       value={activeCanvas?.js || ""}
                       onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, js: e.target.value } : t))}
+                      onKeyDown={(e) => handleCodeKeyDown(e, null, 'js')}
                       rows={6}
                       placeholder="JS"
-                      className={`w-full rounded-2xl border p-3 text-sm outline-none ${currentTheme.panel2}`}
+                      className={`w-full font-mono rounded-2xl border p-3 text-sm outline-none ${currentTheme.panel2}`}
                     />
                   </div>
 
@@ -1448,6 +1612,9 @@ export default function App() {
                     </button>
                     <button onClick={() => window.open(URL.createObjectURL(new Blob([runCanvasTab()], { type: "text/html" })), "_blank")} className={`rounded-full border px-4 py-2 text-xs font-semibold ${currentTheme.chip}`}>
                       <Play size={14} className="inline" /> Run
+                    </button>
+                    <button onClick={downloadCanvasHtml} className={`rounded-full border px-4 py-2 text-xs font-semibold ${currentTheme.chip} hover:text-emerald-400`}>
+                      <DownloadCloud size={14} className="inline" /> Export HTML
                     </button>
                     <button onClick={() => setShowCanvas(false)} className={`rounded-full border px-4 py-2 text-xs font-semibold ${currentTheme.chip}`}>
                       Close
@@ -1467,10 +1634,10 @@ export default function App() {
         {showModels && (
           <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 p-3 md:items-center" onClick={() => setShowModels(false)}>
             <div
-              className={`max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-[28px] border ${currentTheme.panel}`}
+              className={`max-h-[85vh] flex flex-col w-full max-w-4xl overflow-hidden rounded-[28px] border ${currentTheme.panel}`}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="border-b border-white/10 p-4">
+              <div className="border-b border-white/10 p-4 shrink-0">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-lg font-black">Model Browser</div>
@@ -1495,8 +1662,8 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="grid gap-4 p-4 md:grid-cols-2">
-                <div className="space-y-4 overflow-y-auto pr-1">
+              <div className="grid gap-4 p-4 md:grid-cols-2 overflow-y-auto">
+                <div className="space-y-4 pr-1">
                   <div>
                     <SectionTitle icon={BrainCircuit} title="Text Models" />
                     <div className="grid gap-2">
@@ -1580,10 +1747,10 @@ export default function App() {
         {showImageStudio && (
           <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 p-3 md:items-center" onClick={() => setShowImageStudio(false)}>
             <div
-              className={`max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-[28px] border ${currentTheme.panel}`}
+              className={`max-h-[90vh] flex flex-col w-full max-w-5xl overflow-hidden rounded-[28px] border ${currentTheme.panel}`}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="border-b border-white/10 p-4">
+              <div className="border-b border-white/10 p-4 shrink-0">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-lg font-black">Image Studio</div>
@@ -1595,7 +1762,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="grid gap-4 p-4 lg:grid-cols-2">
+              <div className="grid gap-4 p-4 lg:grid-cols-2 overflow-y-auto">
                 <div className={`space-y-4 rounded-3xl border p-4 ${currentTheme.panel2}`}>
                   <div className="flex flex-wrap gap-2">
                     <button onClick={() => setImagePrompt((v) => v || "A cinematic futuristic AI workspace")} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
@@ -1665,7 +1832,16 @@ export default function App() {
                     <img src={imageSource} alt="Source" className="mb-3 max-h-60 w-full rounded-2xl border border-white/10 object-contain" />
                   ) : null}
                   {imageResult ? (
-                    <img src={imageResult} alt="Result" className="max-h-[52vh] w-full rounded-2xl border border-white/10 object-contain" />
+                    <div className="relative group">
+                      <img src={imageResult} alt="Result" className="max-h-[52vh] w-full rounded-2xl border border-white/10 object-contain" />
+                      <button 
+                        onClick={downloadResultImage} 
+                        className="absolute bottom-4 right-4 rounded-xl p-3 bg-black/60 backdrop-blur-md border border-white/20 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/80 shadow-lg"
+                        title="Download Image"
+                      >
+                        <DownloadCloud size={20} />
+                      </button>
+                    </div>
                   ) : (
                     <div className={`grid min-h-[45vh] place-items-center rounded-2xl border border-dashed text-center ${currentTheme.muted}`}>
                       <div>
@@ -1684,10 +1860,10 @@ export default function App() {
         {showSettings && (
           <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 p-3 md:items-center" onClick={() => setShowSettings(false)}>
             <div
-              className={`max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-[28px] border ${currentTheme.panel}`}
+              className={`max-h-[90vh] flex flex-col w-full max-w-4xl overflow-hidden rounded-[28px] border ${currentTheme.panel}`}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="border-b border-white/10 p-4">
+              <div className="border-b border-white/10 p-4 shrink-0">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-lg font-black">Settings</div>
@@ -1699,7 +1875,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="grid gap-4 p-4 md:grid-cols-2">
+              <div className="grid gap-4 p-4 md:grid-cols-2 overflow-y-auto">
                 <div className={`space-y-4 rounded-3xl border p-4 ${currentTheme.panel2}`}>
                   <SectionTitle icon={Settings} title="App" />
                   <div className="space-y-3">
