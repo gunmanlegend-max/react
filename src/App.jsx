@@ -40,7 +40,11 @@ import {
   Square, // Added for the Stop button
   CopyPlus, // Added for cloning
   DownloadCloud, // Added for downloads
-  RefreshCw // Added for regeneration
+  RefreshCw, // Added for regeneration
+  Volume2,
+  VolumeX,
+  FileDown,
+  Maximize
 } from "lucide-react";
 
 const APP_NAME = "Gunnarz AI OS";
@@ -310,6 +314,8 @@ export default function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [abortController, setAbortController] = useState(null); // Added AbortController state
   const [isListening, setIsListening] = useState(false); // Added for Voice Input
+  const [speakingId, setSpeakingId] = useState(""); // Added for TTS
+  const [canvasFullscreen, setCanvasFullscreen] = useState(false); // Added for Canvas
   
   const [copiedId, setCopiedId] = useState("");
   const [promptChip, setPromptChip] = useState("");
@@ -732,6 +738,20 @@ export default function App() {
     }
   }
 
+  // Text-to-Speech Handler
+  const toggleSpeech = (text, id) => {
+    if (speakingId === id) {
+      window.speechSynthesis.cancel();
+      setSpeakingId("");
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = () => setSpeakingId("");
+    window.speechSynthesis.speak(utterance);
+    setSpeakingId(id);
+  };
+
   // Voice Input Handler
   const toggleListening = () => {
     if (isListening) {
@@ -870,23 +890,36 @@ export default function App() {
     
     try {
       let url = "";
+      
       if (apiKeys.openrouter) {
         try {
           const messages = [{ role: "user", content: prompt }];
           const result = await callOpenRouter(messages, selectedImageModel, "image", ["image"], controller.signal);
           const msg = result?.choices?.[0]?.message;
-          url = msg?.images?.[0]?.imageUrl?.url || msg?.images?.[0]?.url || result?._imageUrl || "";
+          const content = msg?.content || "";
+          const match = content.match(/(https?:\/\/[^\s\)]+)/);
+          url = msg?.images?.[0]?.imageUrl?.url || msg?.images?.[0]?.url || result?._imageUrl || match?.[1] || "";
         } catch (err) {
           if (err.name === 'AbortError') throw err;
-          if (!apiKeys.hf) throw err;
-          url = await callHuggingFaceImage(prompt, "", controller.signal);
+          console.warn("OpenRouter image failed, trying fallback...", err);
         }
-      } else if (apiKeys.hf) {
-        url = await callHuggingFaceImage(prompt, "", controller.signal);
-      } else {
-        throw new Error("Add an OpenRouter or Hugging Face key in Settings.");
+      } 
+      
+      if (!url && apiKeys.hf) {
+         try {
+            url = await callHuggingFaceImage(prompt, "", controller.signal);
+         } catch (err) {
+            if (err.name === 'AbortError') throw err;
+            console.warn("HF image failed, trying fallback...", err);
+         }
+      } 
+      
+      // PREMIUM FIX: Keyless Ultimate Fallback (Guarantees an image always returns)
+      if (!url) {
+        url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
       }
-      if (!url) throw new Error("No image returned by the model.");
+
+      if (!url) throw new Error("No image returned by the models.");
       setImageResult(url);
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -925,18 +958,25 @@ export default function App() {
           ];
           const result = await callOpenRouter(messages, selectedImageModel, "image", ["image", "text"], controller.signal);
           const msg = result?.choices?.[0]?.message;
-          url = msg?.images?.[0]?.imageUrl?.url || msg?.images?.[0]?.url || result?._imageUrl || "";
+          const content = msg?.content || "";
+          const match = content.match(/(https?:\/\/[^\s\)]+)/);
+          url = msg?.images?.[0]?.imageUrl?.url || msg?.images?.[0]?.url || result?._imageUrl || match?.[1] || "";
         } catch (err) {
           if (err.name === 'AbortError') throw err;
-          if (!apiKeys.hf) throw err;
-          url = await callHuggingFaceImage(`${prompt}\nUse the source image as reference.`, imageSource, controller.signal);
+          console.warn("OpenRouter image edit failed, trying HF...", err);
         }
-      } else if (apiKeys.hf) {
-        url = await callHuggingFaceImage(`${prompt}\nUse the source image as reference.`, imageSource, controller.signal);
-      } else {
-        throw new Error("Add an OpenRouter or Hugging Face key in Settings.");
       }
-      if (!url) throw new Error("No edited image returned.");
+      
+      if (!url && apiKeys.hf) {
+         try {
+            url = await callHuggingFaceImage(`${prompt}\nUse the source image as reference.`, imageSource, controller.signal);
+         } catch (err) {
+            if (err.name === 'AbortError') throw err;
+            console.warn("HF image edit failed", err);
+         }
+      }
+
+      if (!url) throw new Error("Image edit failed. Please ensure your API keys (OpenRouter or Hugging Face) have vision/image capabilities.");
       setImageResult(url);
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -979,6 +1019,16 @@ export default function App() {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `${currentSession?.title || "session"}.json`;
+    a.click();
+  }
+
+  function exportSessionMarkdown() {
+    if (!currentSession) return;
+    const md = `# ${currentSession.title}\n\n` + currentSession.messages.map(m => `**${m.role === 'user' ? 'You' : 'Gunnarz AI'}**:\n${toPlainText(m.content)}\n`).join("\n---\n\n");
+    const blob = new Blob([md], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${currentSession?.title || "chat"}.md`;
     a.click();
   }
 
@@ -1252,65 +1302,21 @@ export default function App() {
                 action={<button onClick={() => { setShowCanvas(true); setPanel("canvas"); }} className={`text-[11px] ${currentTheme.muted}`}>Open</button>}
               />
               <div className="grid grid-cols-2 gap-2">
-                {[
-                  { id: "chat", label: "Chat", icon: MessageSquare },
-                  { id: "canvas", label: "Canvas", icon: LayoutTemplate },
-                  { id: "models", label: "Models", icon: BrainCircuit },
-                  { id: "image", label: "Images", icon: Wand2 },
-                  { id: "settings", label: "Settings", icon: Settings },
-                  { id: "memory", label: "Memory", icon: Database },
-                ].map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setPanel(item.id);
-                      if (item.id === "canvas") setShowCanvas(true);
-                      if (item.id === "models") setShowModels(true);
-                      if (item.id === "image") setShowImageStudio(true);
-                      if (item.id === "settings") setShowSettings(true);
-                      if (item.id === "memory") setPanel("settings");
-                      setDrawerOpen(false);
-                    }}
-                    className={`rounded-2xl border p-3 text-left ${currentTheme.chip}`}
-                  >
-                    <item.icon size={16} />
-                    <div className="mt-2 text-sm font-semibold">{item.label}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <SectionTitle icon={Database} title="Memory" />
-              <div className="space-y-2">
-                {memoryFacts.slice(0, 4).map((fact, index) => (
-                  <div key={index} className={`rounded-2xl border p-3 text-sm ${currentTheme.panel2}`}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="pr-2">{fact}</div>
-                      <button onClick={() => removeMemoryFact(index)} className="text-red-400">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <SectionTitle icon={Download} title="Import / Export" />
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={exportSession} className={`rounded-2xl border px-3 py-3 text-sm font-semibold ${currentTheme.chip}`}>
-                  Export
-                </button>
-                <label className={`cursor-pointer rounded-2xl border px-3 py-3 text-sm font-semibold ${currentTheme.chip}`}>
-                  Import
-                  <input type="file" accept=".json" onChange={importSession} className="hidden" />
-                </label>
-              </div>
+              <button onClick={exportSession} className={`rounded-2xl border px-3 py-3 text-sm font-semibold ${currentTheme.chip}`}>
+                Export JSON
+              </button>
+              <button onClick={exportSessionMarkdown} className={`rounded-2xl border px-3 py-3 text-sm font-semibold flex items-center justify-center gap-1 ${currentTheme.chip}`}>
+                <FileDown size={14} /> Export MD
+              </button>
+              <label className={`cursor-pointer rounded-2xl border px-3 py-3 text-sm font-semibold col-span-2 text-center ${currentTheme.chip}`}>
+                Import JSON
+                <input type="file" accept=".json" onChange={importSession} className="hidden" />
+              </label>
             </div>
           </div>
+        </div>
 
-          <div className="border-t border-white/10 p-4">
+        <div className="border-t border-white/10 p-4">
             <div className="mb-3 flex items-center justify-between">
               <div className={`text-[11px] uppercase tracking-[0.3em] ${currentTheme.muted}`}>Focus</div>
               <button onClick={() => setTimerOn((v) => !v)} className={`text-xs ${currentTheme.accent}`}>
@@ -1379,6 +1385,11 @@ export default function App() {
                             {!isUser && isLastMessage && (
                               <button onClick={regenerateResponse} title="Regenerate" className="opacity-70 hover:opacity-100 hover:text-emerald-400">
                                 <RefreshCw size={14} />
+                              </button>
+                            )}
+                            {!isUser && (
+                              <button onClick={() => toggleSpeech(toPlainText(msg.content), msg.id)} title={speakingId === msg.id ? "Stop Reading" : "Read Aloud"} className={`opacity-70 hover:opacity-100 ${speakingId === msg.id ? "text-emerald-400 animate-pulse" : ""}`}>
+                                {speakingId === msg.id ? <VolumeX size={14} /> : <Volume2 size={14} />}
                               </button>
                             )}
                             {!isUser && (
@@ -1548,65 +1559,65 @@ export default function App() {
         )}
 
         {panel === "canvas" && showCanvas && (
-          <section className="flex min-h-0 flex-1 flex-col">
-            <div className="flex-1 overflow-hidden p-3 md:p-4">
-              <div className="mx-auto grid h-full max-w-7xl grid-cols-1 gap-3 lg:grid-cols-2">
-                <div className={`rounded-3xl border p-3 ${currentTheme.panel}`}>
-                  <div className="mb-3 flex items-center justify-between">
-                    <SectionTitle icon={LayoutTemplate} title="Canvas" />
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => setCanvasTabs((prev) => [...prev, { id: uid("tab"), name: `Tab ${prev.length + 1}`, html: "", css: "", js: "" }])} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
-                        <Plus size={14} /> Tab
-                      </button>
-                      <button onClick={() => setPanel("chat")} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
-                        <MessageSquare size={14} /> Back
-                      </button>
-                    </div>
-                  </div>
+      <section className={`flex flex-col ${canvasFullscreen ? "fixed inset-0 z-50 bg-black/90 p-2 md:p-6" : "min-h-0 flex-1"}`}>
+        <div className={`flex-1 overflow-hidden ${canvasFullscreen ? "" : "p-3 md:p-4"}`}>
+          <div className="mx-auto grid h-full max-w-7xl grid-cols-1 gap-3 lg:grid-cols-2">
+            <div className={`rounded-3xl border p-3 flex flex-col ${currentTheme.panel}`}>
+              <div className="mb-3 flex items-center justify-between">
+                <SectionTitle icon={LayoutTemplate} title="Canvas" />
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setCanvasFullscreen(!canvasFullscreen)} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip} hover:text-white`}>
+                    <Maximize size={14} /> {canvasFullscreen ? "Exit" : "Expand"}
+                  </button>
+                  <button onClick={() => setCanvasTabs((prev) => [...prev, { id: uid("tab"), name: `Tab ${prev.length + 1}`, html: "", css: "", js: "" }])} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
+                    <Plus size={14} /> Tab
+                  </button>
+                  <button onClick={() => { setPanel("chat"); setCanvasFullscreen(false); }} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
+                    <MessageSquare size={14} /> Back
+                  </button>
+                </div>
+              </div>
 
-                  <div className="mb-3 flex flex-wrap gap-2">
-                    {canvasTabs.map((tab) => (
-                      <button
-                        key={tab.id}
-                        onClick={() => setActiveCanvasTab(tab.id)}
-                        className={`rounded-full border px-3 py-2 text-xs font-semibold ${tab.id === activeCanvasTab ? currentTheme.accentBg : currentTheme.chip}`}
-                      >
-                        {tab.name}
-                      </button>
-                    ))}
-                    <button onClick={cloneActiveCanvas} title="Clone active tab" className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip} hover:text-white`}>
-                      <CopyPlus size={14} className="inline" /> Clone
-                    </button>
-                  </div>
+              <div className="mb-3 flex flex-wrap gap-2">
+                {canvasTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveCanvasTab(tab.id)}
+                    className={`rounded-full border px-3 py-2 text-xs font-semibold ${tab.id === activeCanvasTab ? currentTheme.accentBg : currentTheme.chip}`}
+                  >
+                    {tab.name}
+                  </button>
+                ))}
+                <button onClick={cloneActiveCanvas} title="Clone active tab" className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip} hover:text-white`}>
+                  <CopyPlus size={14} className="inline" /> Clone
+                </button>
+              </div>
 
-                  <div className="space-y-3">
-                    <textarea
-                      value={activeCanvas?.html || ""}
-                      onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, html: e.target.value } : t))}
-                      onKeyDown={(e) => handleCodeKeyDown(e, null, 'html')}
-                      rows={8}
-                      placeholder="HTML"
-                      className={`w-full font-mono rounded-2xl border p-3 text-sm outline-none ${currentTheme.panel2}`}
-                    />
-                    <textarea
-                      value={activeCanvas?.css || ""}
-                      onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, css: e.target.value } : t))}
-                      onKeyDown={(e) => handleCodeKeyDown(e, null, 'css')}
-                      rows={6}
-                      placeholder="CSS"
-                      className={`w-full font-mono rounded-2xl border p-3 text-sm outline-none ${currentTheme.panel2}`}
-                    />
-                    <textarea
-                      value={activeCanvas?.js || ""}
-                      onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, js: e.target.value } : t))}
-                      onKeyDown={(e) => handleCodeKeyDown(e, null, 'js')}
-                      rows={6}
-                      placeholder="JS"
-                      className={`w-full font-mono rounded-2xl border p-3 text-sm outline-none ${currentTheme.panel2}`}
-                    />
-                  </div>
+              <div className="space-y-3 flex-1 flex flex-col min-h-0">
+                <textarea
+                  value={activeCanvas?.html || ""}
+                  onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, html: e.target.value } : t))}
+                  onKeyDown={(e) => handleCodeKeyDown(e, null, 'html')}
+                  placeholder="HTML"
+                  className={`w-full flex-1 font-mono rounded-2xl border p-3 text-sm outline-none resize-none ${currentTheme.panel2}`}
+                />
+                <textarea
+                  value={activeCanvas?.css || ""}
+                  onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, css: e.target.value } : t))}
+                  onKeyDown={(e) => handleCodeKeyDown(e, null, 'css')}
+                  placeholder="CSS"
+                  className={`w-full flex-1 font-mono rounded-2xl border p-3 text-sm outline-none resize-none ${currentTheme.panel2}`}
+                />
+                <textarea
+                  value={activeCanvas?.js || ""}
+                  onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, js: e.target.value } : t))}
+                  onKeyDown={(e) => handleCodeKeyDown(e, null, 'js')}
+                  placeholder="JS"
+                  className={`w-full flex-1 font-mono rounded-2xl border p-3 text-sm outline-none resize-none ${currentTheme.panel2}`}
+                />
+              </div>
 
-                  <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-wrap gap-2">
                     <button onClick={() => updateSession(currentSession.id, (s) => s)} className={`rounded-full border px-4 py-2 text-xs font-semibold ${currentTheme.chip}`}>
                       Save
                     </button>
