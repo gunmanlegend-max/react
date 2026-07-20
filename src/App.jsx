@@ -37,26 +37,28 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
-  Square, // Added for the Stop button
-  CopyPlus, // Added for cloning
-  DownloadCloud, // Added for downloads
-  RefreshCw, // Added for regeneration
+  Square,
+  DownloadCloud,
+  RefreshCw,
   Volume2,
   VolumeX,
   FileDown,
-  Maximize
+  Maximize,
+  Loader2,
+  ExternalLink,
+  Info
 } from "lucide-react";
 
 const APP_NAME = "Gunnarz AI OS";
 const STORAGE = {
-  sessions: "gunnarz.sessions.v1",
-  activeSession: "gunnarz.activeSession.v1",
-  keys: "gunnarz.keys.v1",
-  ui: "gunnarz.ui.v1",
-  memory: "gunnarz.memory.v1",
-  stars: "gunnarz.stars.v1",
-  canvas: "gunnarz.canvas.v1",
-  image: "gunnarz.image.v1",
+  sessions: "gunnarz.sessions.v2",
+  activeSession: "gunnarz.activeSession.v2",
+  keys: "gunnarz.keys.v2",
+  ui: "gunnarz.ui.v2",
+  memory: "gunnarz.memory.v2",
+  stars: "gunnarz.stars.v2",
+  canvas: "gunnarz.canvas.v2",
+  image: "gunnarz.image.v2",
 };
 
 const THEME_PRESETS = {
@@ -103,7 +105,7 @@ const QUICK_PROMPTS = [
   "Debug the code",
   "Summarize in bullets",
   "Write a study guide",
-  "Generate an image",
+  "Generate an image of a futuristic workspace",
   "Improve this design",
 ];
 
@@ -117,26 +119,112 @@ const TONES = {
 };
 
 const FALLBACK_TEXT_MODELS = [
-  { slug: "openrouter/auto", label: "OpenRouter Auto", provider: "OpenRouter", kind: "router" },
-  { slug: "openai/gpt-5.2", label: "GPT-5.2", provider: "OpenAI", kind: "general" },
-  { slug: "openai/gpt-5-chat-latest", label: "GPT Chat Latest", provider: "OpenAI", kind: "general" },
-  { slug: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4", provider: "Anthropic", kind: "reasoning" },
-  { slug: "anthropic/claude-opus-4", label: "Claude Opus 4", provider: "Anthropic", kind: "reasoning" },
   { slug: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", provider: "Google", kind: "reasoning" },
   { slug: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "Google", kind: "fast" },
+  { slug: "openrouter/auto", label: "OpenRouter Auto", provider: "OpenRouter", kind: "router" },
+  { slug: "openai/gpt-5.2", label: "GPT-5.2", provider: "OpenAI", kind: "general" },
+  { slug: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4", provider: "Anthropic", kind: "reasoning" },
   { slug: "perplexity/sonar-pro", label: "Perplexity Sonar Pro", provider: "Perplexity", kind: "search" },
-  { slug: "meta-llama/llama-4-maverick", label: "Llama 4 Maverick", provider: "Meta", kind: "open" },
-  { slug: "qwen/qwen3-coder", label: "Qwen3 Coder", provider: "Qwen", kind: "coding" },
 ];
 
 const FALLBACK_IMAGE_MODELS = [
-  { slug: "openai/gpt-5-image", label: "GPT-5 Image", provider: "OpenAI", kind: "image" },
   { slug: "google/gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", provider: "Google", kind: "image" },
   { slug: "google/gemini-3.1-flash-image-preview", label: "Gemini 3.1 Flash Image", provider: "Google", kind: "image" },
+  { slug: "openai/gpt-5-image", label: "GPT-5 Image", provider: "OpenAI", kind: "image" },
   { slug: "black-forest-labs/flux.2-pro", label: "Flux 2 Pro", provider: "Black Forest Labs", kind: "image" },
-  { slug: "black-forest-labs/flux.2-flex", label: "Flux 2 Flex", provider: "Black Forest Labs", kind: "image" },
-  { slug: "sourceful/riverflow-v2-fast", label: "Riverflow V2 Fast", provider: "Sourceful", kind: "image" },
 ];
+
+const CANVAS_TEMPLATES = {
+  counter: {
+    name: "Interactive Counter",
+    html: `<div class="counter-container">
+  <h1>Counter App</h1>
+  <div id="count" class="count-value">0</div>
+  <div class="actions">
+    <button onclick="decrement()">-</button>
+    <button onclick="reset()">Reset</button>
+    <button onclick="increment()">+</button>
+  </div>
+</div>`,
+    css: `body {
+  font-family: 'Inter', sans-serif;
+  background: #0f172a;
+  color: #fff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  margin: 0;
+}
+.counter-container {
+  background: #1e293b;
+  padding: 2.5rem;
+  border-radius: 20px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+  text-align: center;
+}
+.count-value {
+  font-size: 5rem;
+  font-weight: 800;
+  margin: 1.5rem 0;
+}
+button {
+  background: #3b82f6;
+  border: none;
+  color: white;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  border-radius: 10px;
+  margin: 0 0.5rem;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+button:hover {
+  opacity: 0.9;
+}`,
+    js: `let count = 0;
+function increment() {
+  count++;
+  document.getElementById('count').innerText = count;
+}
+function decrement() {
+  count--;
+  document.getElementById('count').innerText = count;
+}
+function reset() {
+  count = 0;
+  document.getElementById('count').innerText = count;
+}`
+  },
+  clock: {
+    name: "Digital Art Clock",
+    html: `<div class="clock">
+  <div class="time" id="display">00:00:00</div>
+</div>`,
+    css: `body {
+  background: #020205;
+  color: #00ffd0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  margin: 0;
+  font-family: monospace;
+}
+.time {
+  font-size: 4rem;
+  letter-spacing: 0.2rem;
+  text-shadow: 0 0 20px #00ffd0;
+}`,
+    js: `function updateClock() {
+  const d = new Date();
+  const time = d.toTimeString().split(' ')[0];
+  document.getElementById('display').innerText = time;
+}
+setInterval(updateClock, 1000);
+updateClock();`
+  }
+};
 
 function safeParse(value, fallback) {
   try {
@@ -263,7 +351,6 @@ function renderRichText(text, copyKey, onCopy, accentClass = "text-emerald-400")
             );
           }
           
-          // XSS FIX: Escape HTML characters *before* applying markdown regex
           const safeLine = line
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
@@ -291,13 +378,14 @@ export default function App() {
   const [showModels, setShowModels] = useState(false);
   const [showImageStudio, setShowImageStudio] = useState(false);
   const [showCanvas, setShowCanvas] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [searchBarOpen, setSearchBarOpen] = useState(false);
 
   const [apiKeys, setApiKeys] = useState({ openrouter: "", groq: "", hf: "" });
   const [rememberKeys, setRememberKeys] = useState(true);
   const [tone, setTone] = useState("balanced");
-  const [selectedModel, setSelectedModel] = useState("openrouter/auto");
-  const [selectedImageModel, setSelectedImageModel] = useState("openai/gpt-5-image");
+  const [selectedModel, setSelectedModel] = useState("google/gemini-2.5-flash");
+  const [selectedImageModel, setSelectedImageModel] = useState("google/gemini-2.5-flash-image");
   const [liveSearchMode, setLiveSearchMode] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -312,10 +400,11 @@ export default function App() {
   const [attachments, setAttachments] = useState([]);
   const [streamed, setStreamed] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [abortController, setAbortController] = useState(null); // Added AbortController state
-  const [isListening, setIsListening] = useState(false); // Added for Voice Input
-  const [speakingId, setSpeakingId] = useState(""); // Added for TTS
-  const [canvasFullscreen, setCanvasFullscreen] = useState(false); // Added for Canvas
+  const [abortController, setAbortController] = useState(null);
+  const [isListening, setIsListening] = useState(false);
+  const [speakingId, setSpeakingId] = useState("");
+  const [canvasFullscreen, setCanvasFullscreen] = useState(false);
+  const [isParsingFile, setIsParsingFile] = useState(false);
   
   const [copiedId, setCopiedId] = useState("");
   const [promptChip, setPromptChip] = useState("");
@@ -323,6 +412,9 @@ export default function App() {
   const [openRouterModels, setOpenRouterModels] = useState([]);
   const [openRouterImageModels, setOpenRouterImageModels] = useState([]);
   const [modelsLoading, setModelsLoading] = useState(false);
+  
+  const [toastMessage, setToastMessage] = useState("");
+  const [toastType, setToastType] = useState("info");
 
   const [canvasTabs, setCanvasTabs] = useState([
     {
@@ -349,7 +441,7 @@ export default function App() {
   const imageInputRef = useRef(null);
   const drawerRef = useRef(null);
   const chatEndRef = useRef(null);
-  const recognitionRef = useRef(null); // Added for Voice Input
+  const recognitionRef = useRef(null);
 
   const currentTheme = THEME_PRESETS[theme] || THEME_PRESETS.cyber;
 
@@ -369,6 +461,30 @@ export default function App() {
   }, [sessions, sessionSearch, starred]);
 
   const currentMessages = useMemo(() => currentSession?.messages || [], [currentSession]);
+
+  // iframe-safe Robust Clipboard Copy Tool
+  const copyText = (text, id) => {
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      showToast("Copied to clipboard!", "info");
+    } catch (e) {
+      try {
+        navigator.clipboard?.writeText(text);
+        showToast("Copied to clipboard!", "info");
+      } catch (err) {
+        showToast("Failed to copy text", "error");
+      }
+    }
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(""), 1300);
+  };
 
   useEffect(() => {
     const savedSessions = safeParse(localStorage.getItem(STORAGE.sessions), []);
@@ -398,14 +514,22 @@ export default function App() {
     setApiKeys(savedKeys || { openrouter: "", groq: "", hf: "" });
     setTheme(savedUi.theme || "cyber");
     setTone(savedUi.tone || "balanced");
-    setSelectedModel(savedUi.selectedModel || "openrouter/auto");
-    setSelectedImageModel(savedUi.selectedImageModel || "openai/gpt-5-image");
+    setSelectedModel(savedUi.selectedModel || "google/gemini-2.5-flash");
+    setSelectedImageModel(savedUi.selectedImageModel || "google/gemini-2.5-flash-image");
     setRememberKeys(savedUi.rememberKeys ?? true);
     setLiveSearchMode(savedUi.liveSearchMode ?? false);
     setAutoScroll(savedUi.autoScroll ?? true);
     setMemoryFacts(Array.isArray(savedMemory) ? savedMemory : []);
     setStarred(Array.isArray(savedStars) ? savedStars : []);
-    setCanvasTabs(Array.isArray(savedCanvas) && savedCanvas.length ? savedCanvas : []);
+    setCanvasTabs(Array.isArray(savedCanvas) && savedCanvas.length ? savedCanvas : [
+      {
+        id: "tab1",
+        name: "Workspace",
+        html: "<div class='app'><h1>Workspace Ready</h1><p>Paste HTML here or let an assistant response open a new tab.</p></div>",
+        css: "body{font-family:sans-serif;background:#050510;color:#e2e8f0;padding:24px}.app{max-width:900px;margin:0 auto}",
+        js: "console.log('Canvas ready')",
+      }
+    ]);
     if (savedImage) {
       setImagePrompt(savedImage.imagePrompt || "");
       setImageEditPrompt(savedImage.imageEditPrompt || "");
@@ -450,6 +574,7 @@ export default function App() {
       setTimerSeconds((t) => {
         if (t <= 1) {
           setTimerOn(false);
+          showToast("Focus session complete!", "info");
           return 0;
         }
         return t - 1;
@@ -468,17 +593,30 @@ export default function App() {
         e.preventDefault();
         setSearchBarOpen((v) => !v);
       }
+      if (e.key === "?") {
+        e.preventDefault();
+        setShowHelp((v) => !v);
+      }
       if (e.key === "Escape") {
         setDrawerOpen(false);
         setShowSettings(false);
         setShowModels(false);
         setShowImageStudio(false);
         setShowCanvas(false);
+        setShowHelp(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  function showToast(message, type = "info") {
+    setToastMessage(message);
+    setToastType(type);
+    setTimeout(() => {
+      setToastMessage("");
+    }, 4000);
+  }
 
   async function refreshOpenRouterModels() {
     setModelsLoading(true);
@@ -539,6 +677,7 @@ export default function App() {
     setSessions((prev) => [sess, ...prev]);
     setActiveSessionId(sess.id);
     setDrawerOpen(false);
+    showToast("Started new chat session", "info");
   }
 
   function deleteSession(id) {
@@ -559,42 +698,98 @@ export default function App() {
         ],
       }];
     });
+    showToast("Chat deleted", "info");
   }
 
   function togglePin(id) {
-    setStarred((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [id, ...prev]));
+    setStarred((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [id, ...prev];
+      showToast(prev.includes(id) ? "Chat unpinned" : "Chat pinned", "info");
+      return next;
+    });
   }
 
   function renameSession(id, title) {
     updateSession(id, (s) => ({ ...s, title: title.trim() || s.title }));
   }
 
-  function copyText(text, id) {
-    navigator.clipboard?.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(""), 1300);
-  }
-
-  function addAttachment(file) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setAttachments((prev) => [
-        ...prev,
-        {
-          id: uid("att"),
-          name: file.name,
-          type: file.type || "file",
-          data: e.target?.result,
-        },
-      ]);
-    };
-    if (file.type.startsWith("image/")) reader.readAsDataURL(file);
-    else reader.readAsText(file);
-  }
-
-  function handleFilePick(e) {
-    const file = e.target.files?.[0];
-    if (file) addAttachment(file);
+  async function handleFilePick(e) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    
+    setIsParsingFile(true);
+    
+    for (const file of files) {
+      try {
+        const fileExt = file.name.split('.').pop().toLowerCase();
+        
+        if (file.type.startsWith("image/")) {
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            setAttachments((prev) => [...prev, { id: uid("att"), name: file.name, type: file.type, data: ev.target.result, isImage: true }]);
+          };
+          reader.readAsDataURL(file);
+        } else if (file.type === "application/pdf") {
+          if (!window.pdfjsLib) {
+            await new Promise((resolve, reject) => {
+              const script = document.createElement('script');
+              script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+              script.onload = () => {
+                window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                resolve();
+              };
+              script.onerror = () => reject(new Error("Failed to load PDF engine"));
+              document.head.appendChild(script);
+            });
+          }
+          
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await window.pdfjsLib.getDocument(arrayBuffer).promise;
+          let fullText = "";
+          
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            fullText += textContent.items.map(s => s.str).join(' ') + "\n";
+          }
+          
+          setAttachments((prev) => [...prev, { 
+            id: uid("att"), name: file.name, type: "PDF Document", 
+            extractedText: fullText.slice(0, 50000),
+            isImage: false 
+          }]);
+          showToast(`Successfully imported PDF (${pdf.numPages} pages)`, "info");
+        } else if (["html", "css", "js"].includes(fileExt)) {
+          const text = await file.text();
+          setCanvasTabs((prev) => {
+            const freshTab = {
+              id: uid("tab"),
+              name: file.name,
+              html: fileExt === "html" ? text : "",
+              css: fileExt === "css" ? text : "",
+              js: fileExt === "js" ? text : "",
+            };
+            setActiveCanvasTab(freshTab.id);
+            return [...prev, freshTab];
+          });
+          setPanel("canvas");
+          setShowCanvas(true);
+          showToast(`Injected ${file.name} directly into Canvas`, "info");
+        } else {
+          const text = await file.text();
+          setAttachments((prev) => [...prev, { 
+            id: uid("att"), name: file.name, type: file.type || "Document", 
+            extractedText: text.slice(0, 50000), 
+            isImage: false 
+          }]);
+          showToast(`Imported ${file.name}`, "info");
+        }
+      } catch (err) {
+        showToast(`Could not process ${file.name}: ${err.message}`, "error");
+      }
+    }
+    
+    setIsParsingFile(false);
     e.target.value = "";
   }
 
@@ -610,6 +805,7 @@ export default function App() {
     setActiveCanvasTab(tab.id);
     setPanel("canvas");
     setShowCanvas(true);
+    showToast("Opened module in Canvas!", "info");
   }
 
   function isRateLimitLikeError(message = "") {
@@ -631,7 +827,6 @@ export default function App() {
     return map.find(([needle]) => String(selectedModel).includes(needle))?.[1] || "llama-3.3-70b-versatile";
   }
 
-  // API calls updated to accept AbortSignal
   async function callGroq(messages, model = pickGroqModel(), signal) {
     if (!apiKeys.groq) throw new Error("Add your Groq key in Settings.");
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -646,7 +841,7 @@ export default function App() {
         temperature: 0.7,
         max_tokens: 2048,
       }),
-      signal, // Attach signal
+      signal,
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data?.error?.message || "Groq request failed.");
@@ -655,10 +850,11 @@ export default function App() {
 
   async function callHuggingFaceImage(prompt, sourceImage = "", signal) {
     if (!apiKeys.hf) throw new Error("Add your Hugging Face token in Settings.");
-    const model = "black-forest-labs/FLUX.1-schnell";
+    const model = sourceImage ? "timbrooks/instruct-pix2pix" : "black-forest-labs/FLUX.1-schnell";
     const payload = sourceImage
       ? { inputs: { prompt, image: sourceImage } }
       : { inputs: prompt };
+      
     const res = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
       method: "POST",
       headers: {
@@ -676,6 +872,107 @@ export default function App() {
     return URL.createObjectURL(blob);
   }
 
+  async function callNativeGeminiText(messages, systemPrompt, useSearch, signal) {
+    const apiKey = ""; 
+    const formattedContents = messages.map(msg => ({
+      role: msg.role === "assistant" ? "model" : "user",
+      parts: [{ text: msg.content }]
+    }));
+
+    const payload = {
+      contents: formattedContents,
+      systemInstruction: { parts: [{ text: systemPrompt }] }
+    };
+
+    if (useSearch) {
+      payload.tools = [{ google_search: {} }];
+    }
+
+    const maxRetries = 5;
+    let delay = 1000;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal
+        });
+        
+        if (res.ok) {
+          const result = await res.json();
+          const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "No response content.";
+          const groundingAttributions = result.candidates?.[0]?.groundingMetadata?.groundingAttributions?.map(a => ({
+            uri: a.web?.uri,
+            title: a.web?.title
+          })) || [];
+          return { text, attributions: groundingAttributions };
+        }
+        
+        if (res.status !== 429 && res.status < 500) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData?.error?.message || `API returned status ${res.status}`);
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') throw err;
+        if (attempt === maxRetries - 1) throw err;
+      }
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2;
+    }
+    throw new Error("Failed to reach Gemini API after retrying.");
+  }
+
+  async function callNativeGeminiImageGenerate(prompt, signal) {
+    const apiKey = "";
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instances: { prompt: prompt },
+        parameters: { sampleCount: 1 }
+      }),
+      signal
+    });
+    if (!res.ok) throw new Error("Native generation failed");
+    const result = await res.json();
+    if (result.predictions?.[0]?.bytesBase64Encoded) {
+      return `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+    }
+    throw new Error("No image data in native response");
+  }
+
+  async function callNativeGeminiImageEdit(prompt, dataUrl, signal) {
+    const apiKey = "";
+    const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!match) throw new Error("Invalid image source format");
+    const mimeType = match[1];
+    const base64Data = match[2];
+
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType: mimeType, data: base64Data } }
+          ]
+        }],
+        generationConfig: { responseModalities: ["TEXT", "IMAGE"] }
+      }),
+      signal
+    });
+    if (!res.ok) throw new Error("Native edit failed");
+    const result = await res.json();
+    const inlineData = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
+    if (inlineData?.data) {
+      return `data:${inlineData.mimeType || 'image/png'};base64,${inlineData.data}`;
+    }
+    throw new Error("No image data returned from edit");
+  }
+
   async function callOpenRouter(messages, model, modalType = "text", imageModalities = ["text"], signal) {
     if (!apiKeys.openrouter) throw new Error("Add your OpenRouter key in Settings.");
 
@@ -689,7 +986,7 @@ export default function App() {
       body.modalities = imageModalities;
     }
 
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const res = await fetch("https://openrouter.ai/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKeys.openrouter}`,
@@ -698,7 +995,7 @@ export default function App() {
         "X-Title": APP_NAME,
       },
       body: JSON.stringify(body),
-      signal, // Attach signal
+      signal,
     });
 
     const data = await res.json().catch(() => ({}));
@@ -721,24 +1018,12 @@ export default function App() {
     return data;
   }
 
-  function sessionSystemPrompt() {
-    const memoryBlock = memoryFacts.length
-      ? `\nUser memory:\n${memoryFacts.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
-      : "";
-    return {
-      role: "system",
-      content: `${TONES[tone] || TONES.balanced}${memoryBlock}`,
-    };
-  }
-
-  // Cancel generation handler
   function stopGeneration() {
     if (abortController) {
       abortController.abort();
     }
   }
 
-  // Text-to-Speech Handler
   const toggleSpeech = (text, id) => {
     if (speakingId === id) {
       window.speechSynthesis.cancel();
@@ -752,7 +1037,6 @@ export default function App() {
     setSpeakingId(id);
   };
 
-  // Voice Input Handler
   const toggleListening = () => {
     if (isListening) {
       recognitionRef.current?.stop();
@@ -761,7 +1045,7 @@ export default function App() {
     }
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Speech recognition is not supported in this browser. Try Chrome or Safari.");
+      showToast("Speech recognition is not supported in this browser.", "error");
       return;
     }
     const rec = new SpeechRecognition();
@@ -793,58 +1077,50 @@ export default function App() {
       title: s.title === "Welcome" || s.title === "New Chat" ? userText.slice(0, 30) : s.title,
     }));
 
+    let finalPrompt = userText;
+    const docAttachments = attachments.filter(a => !a.isImage && a.extractedText);
+    
+    if (docAttachments.length > 0) {
+      finalPrompt = "I have attached the following documents for context:\n\n" +
+        docAttachments.map(a => `--- START OF ${a.name} ---\n${a.extractedText}\n--- END OF ${a.name} ---`).join("\n\n") +
+        "\n\nUser Query: " + userText;
+    }
+
     setComposer("");
     setAttachments([]);
     setIsTyping(true);
     setStreamed("");
 
-    // Initialize Abort Controller for the request
     const controller = new AbortController();
     setAbortController(controller);
 
     try {
       let reply = "";
+      let groundingLinks = [];
 
       const conversation = [
-        sessionSystemPrompt(),
         ...currentMessages.map((m) => ({
           role: m.role,
           content: toPlainText(m.content),
         })),
         {
           role: "user",
-          content: userText,
+          content: finalPrompt,
         },
       ];
 
-      if (liveSearchMode || selectedModel.includes("perplexity")) {
-        conversation[0] = {
-          role: "system",
-          content: `${TONES.perplexity}\nUse concise grounded answers. If a claim is uncertain, say so.`,
-        };
-      }
-
-      if (attachments.length) {
-        const imageAttachment = attachments.find((a) => String(a.type).startsWith("image/"));
-        if (imageAttachment) {
-          conversation[conversation.length - 1] = {
-            role: "user",
-            content: [
-              { type: "text", text: userText },
-              { type: "image_url", image_url: { url: imageAttachment.data } },
-            ],
-          };
-        }
-      }
+      const sysPromptText = `${TONES[tone] || TONES.balanced}${memoryFacts.length ? `\nUser memory:\n${memoryFacts.map((f, i) => `${i + 1}. ${f}`).join("\n")}` : ""}`;
 
       if (apiKeys.openrouter) {
-        const result = await callOpenRouter(conversation, selectedModel, "text", ["text"], controller.signal);
+        const result = await callOpenRouter([ { role: "system", content: sysPromptText }, ...conversation], selectedModel, "text", ["text"], controller.signal);
         reply = result?.choices?.[0]?.message?.content || "No response returned.";
       } else if (apiKeys.groq) {
-        const result = await callGroq(conversation, pickGroqModel(), controller.signal);
+        const result = await callGroq([ { role: "system", content: sysPromptText }, ...conversation], pickGroqModel(), controller.signal);
         reply = result?.choices?.[0]?.message?.content || "No response returned.";
       } else {
-        reply = "Add an OpenRouter or Groq key in Settings, then pick a model and send again.";
+        const result = await callNativeGeminiText(conversation, sysPromptText, liveSearchMode, controller.signal);
+        reply = result.text;
+        groundingLinks = result.attributions;
       }
 
       setStreamed(reply);
@@ -852,7 +1128,7 @@ export default function App() {
         ...s,
         messages: [
           ...s.messages,
-          { id: uid("msg"), role: "assistant", content: reply },
+          { id: uid("msg"), role: "assistant", content: reply, attributions: groundingLinks },
         ],
       }));
 
@@ -862,13 +1138,7 @@ export default function App() {
       const estimatedTokens = Math.ceil((userText.length + reply.length) / 4);
       setStats((prev) => ({ tokens: prev.tokens + estimatedTokens, chats: sessions.length }));
     } catch (err) {
-      let reply = "";
-      if (err.name === 'AbortError') {
-        reply = "Generation stopped by user.";
-      } else {
-        reply = `Error: ${err.message}`;
-      }
-      
+      let reply = err.name === 'AbortError' ? "Generation stopped by user." : `Error: ${err.message}`;
       updateSession(session.id, (s) => ({
         ...s,
         messages: [...s.messages, { id: uid("msg"), role: "assistant", content: reply }],
@@ -914,17 +1184,22 @@ export default function App() {
          }
       } 
       
-      // PREMIUM FIX: Keyless Ultimate Fallback (Guarantees an image always returns)
       if (!url) {
-        url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
+        try {
+          url = await callNativeGeminiImageGenerate(prompt, controller.signal);
+        } catch(e) {
+          if (e.name === 'AbortError') throw e;
+          url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
+        }
       }
 
       if (!url) throw new Error("No image returned by the models.");
       setImageResult(url);
+      showToast("Image generated!", "info");
     } catch (err) {
       if (err.name !== 'AbortError') {
          setImageResult("");
-         alert(err.message);
+         showToast(err.message, "error");
       }
     } finally {
       setImageBusy(false);
@@ -936,7 +1211,8 @@ export default function App() {
     const prompt = imageEditPrompt.trim();
     if (!prompt || imageBusy) return;
     if (!imageSource) {
-      throw new Error("Upload or paste a source image first.");
+      showToast("Upload or paste a source image first.", "error");
+      return;
     }
     setImageBusy(true);
     
@@ -976,12 +1252,22 @@ export default function App() {
          }
       }
 
-      if (!url) throw new Error("Image edit failed. Please ensure your API keys (OpenRouter or Hugging Face) have vision/image capabilities.");
+      if (!url) {
+        try {
+           url = await callNativeGeminiImageEdit(prompt, imageSource, controller.signal);
+        } catch(err) {
+           if (err.name === 'AbortError') throw err;
+           console.error("Native edit fallback failed:", err);
+        }
+      }
+
+      if (!url) throw new Error("Image edit failed. Ensure your keys or fallbacks have correct permissions.");
       setImageResult(url);
+      showToast("Image successfully edited!", "info");
     } catch (err) {
       if (err.name !== 'AbortError') {
          setImageResult("");
-         alert(err.message);
+         showToast(err.message, "error");
       }
     } finally {
       setImageBusy(false);
@@ -994,23 +1280,24 @@ export default function App() {
     if (!text) return;
     setMemoryFacts((prev) => [text, ...prev]);
     setMemoryInput("");
+    showToast("Fact saved to memory!", "info");
   }
 
   function removeMemoryFact(index) {
     setMemoryFacts((prev) => prev.filter((_, i) => i !== index));
+    showToast("Memory cleared", "info");
   }
 
   function runCanvasTab() {
     const tab = canvasTabs.find((t) => t.id === activeCanvasTab) || canvasTabs[0];
     if (!tab) return "";
-    const doc = `<!doctype html><html><head><style>${tab.css || ""}</style></head><body>${tab.html || ""}<script>
+    return `<!doctype html><html><head><style>${tab.css || ""}</style></head><body>${tab.html || ""}<script>
     try {
       const _log = console.log;
       console.log = (...a) => _log(...a);
       ${tab.js || ""}
     } catch (e) { console.error(e); }
     </script></body></html>`;
-    return doc;
   }
 
   function exportSession() {
@@ -1020,6 +1307,7 @@ export default function App() {
     a.href = URL.createObjectURL(blob);
     a.download = `${currentSession?.title || "session"}.json`;
     a.click();
+    showToast("Exported session JSON", "info");
   }
 
   function exportSessionMarkdown() {
@@ -1030,6 +1318,7 @@ export default function App() {
     a.href = URL.createObjectURL(blob);
     a.download = `${currentSession?.title || "chat"}.md`;
     a.click();
+    showToast("Exported chat Markdown", "info");
   }
 
   function importSession(e) {
@@ -1043,30 +1332,31 @@ export default function App() {
         parsed.messages = Array.isArray(parsed.messages) ? parsed.messages : [];
         setSessions((prev) => [parsed, ...prev]);
         setActiveSessionId(parsed.id);
-      } catch {}
+        showToast("Session loaded successfully", "info");
+      } catch {
+        showToast("Could not parse session backup file.", "error");
+      }
     };
     reader.readAsText(file);
     e.target.value = "";
   }
 
   const modelSource = useMemo(() => {
-    const list = openRouterModels.length ? openRouterModels : FALLBACK_TEXT_MODELS;
-    return list;
+    return openRouterModels.length ? openRouterModels : FALLBACK_TEXT_MODELS;
   }, [openRouterModels]);
 
   const imageModelSource = useMemo(() => {
-    const list = openRouterImageModels.length ? openRouterImageModels : FALLBACK_IMAGE_MODELS;
-    return list;
+    return openRouterImageModels.length ? openRouterImageModels : FALLBACK_IMAGE_MODELS;
   }, [openRouterImageModels]);
 
   const activeCanvas = canvasTabs.find((t) => t.id === activeCanvasTab) || canvasTabs[0];
 
-  // --- NEW PREMIUM FEATURES ---
   function cloneActiveCanvas() {
     if (!activeCanvas) return;
     const newTab = { ...activeCanvas, id: uid("tab"), name: `${activeCanvas.name} (Copy)` };
     setCanvasTabs((prev) => [...prev, newTab]);
     setActiveCanvasTab(newTab.id);
+    showToast("Cloned active tab!", "info");
   }
 
   function downloadCanvasHtml() {
@@ -1076,6 +1366,7 @@ export default function App() {
     a.href = URL.createObjectURL(blob);
     a.download = `${activeCanvas?.name || "gunnarz-canvas"}.html`;
     a.click();
+    showToast("Downloaded HTML webpage", "info");
   }
 
   async function downloadResultImage() {
@@ -1087,7 +1378,7 @@ export default function App() {
       a.href = URL.createObjectURL(blob);
       a.download = `gunnarz-image-${Date.now()}.png`;
       a.click();
-    } catch (e) {
+    } catch {
       const a = document.createElement("a");
       a.href = imageResult;
       a.download = `gunnarz-image-${Date.now()}.png`;
@@ -1112,6 +1403,22 @@ export default function App() {
     }
   };
 
+  function loadTemplateToCanvas(templateKey) {
+    const t = CANVAS_TEMPLATES[templateKey];
+    if (!t) return;
+    setCanvasTabs((prev) => [
+      ...prev,
+      {
+        id: uid("tab"),
+        name: t.name,
+        html: t.html,
+        css: t.css,
+        js: t.js
+      }
+    ]);
+    showToast(`Loaded template: ${t.name}`, "info");
+  }
+
   async function regenerateResponse() {
     const session = ensureSession();
     if (session.messages.length < 2) return;
@@ -1129,28 +1436,23 @@ export default function App() {
     try {
       let reply = "";
       const conversation = [
-        sessionSystemPrompt(),
         ...prevMessages.map((m) => ({
           role: m.role,
           content: toPlainText(m.content),
         })),
       ];
 
-      if (liveSearchMode || selectedModel.includes("perplexity")) {
-        conversation[0] = {
-          role: "system",
-          content: `${TONES.perplexity}\nUse concise grounded answers. If a claim is uncertain, say so.`,
-        };
-      }
+      const sysPromptText = `${TONES[tone] || TONES.balanced}${memoryFacts.length ? `\nUser memory:\n${memoryFacts.map((f, i) => `${i + 1}. ${f}`).join("\n")}` : ""}`;
 
       if (apiKeys.openrouter) {
-        const result = await callOpenRouter(conversation, selectedModel, "text", ["text"], controller.signal);
+        const result = await callOpenRouter([ { role: "system", content: sysPromptText }, ...conversation], selectedModel, "text", ["text"], controller.signal);
         reply = result?.choices?.[0]?.message?.content || "No response returned.";
       } else if (apiKeys.groq) {
-        const result = await callGroq(conversation, pickGroqModel(), controller.signal);
+        const result = await callGroq([ { role: "system", content: sysPromptText }, ...conversation], pickGroqModel(), controller.signal);
         reply = result?.choices?.[0]?.message?.content || "No response returned.";
       } else {
-        reply = "Add an OpenRouter or Groq key in Settings, then pick a model and send again.";
+        const result = await callNativeGeminiText(conversation, sysPromptText, liveSearchMode, controller.signal);
+        reply = result.text;
       }
 
       setStreamed(reply);
@@ -1176,7 +1478,7 @@ export default function App() {
   }
 
   return (
-    <div className={`flex h-screen overflow-hidden ${currentTheme.root}`}>
+    <div className={`flex h-screen overflow-hidden select-none ${currentTheme.root}`}>
       <input ref={fileInputRef} onChange={handleFilePick} type="file" className="hidden" />
       <input ref={imageInputRef} onChange={(e) => {
         const file = e.target.files?.[0];
@@ -1186,6 +1488,13 @@ export default function App() {
         reader.readAsDataURL(file);
         e.target.value = "";
       }} type="file" accept="image/*" className="hidden" />
+
+      {toastMessage && (
+        <div className={`fixed bottom-6 right-6 z-[100] max-w-sm flex items-center gap-3 rounded-2xl px-5 py-4 border shadow-2xl backdrop-blur-lg animate-bounce transition-all ${toastType === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-200' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200'}`}>
+          <Sparkles size={16} />
+          <span className="text-sm font-semibold">{toastMessage}</span>
+        </div>
+      )}
 
       {drawerOpen && (
         <div className="fixed inset-0 z-40 bg-black/60 md:hidden" onClick={() => setDrawerOpen(false)} />
@@ -1243,7 +1552,7 @@ export default function App() {
                 return (
                   <div
                     key={s.id}
-                    className={`group rounded-2xl border p-3 ${active ? "border-white/20 bg-white/5" : "border-white/10 bg-transparent"}`}
+                    className={`group rounded-2xl border p-3 cursor-pointer ${active ? "border-white/20 bg-white/5" : "border-white/10 bg-transparent"}`}
                     onClick={() => {
                       setActiveSessionId(s.id);
                       setPanel("chat");
@@ -1262,7 +1571,7 @@ export default function App() {
                               const title = prompt("Rename chat", s.title);
                               if (title !== null) renameSession(s.id, title);
                             }}
-                            className="truncate text-left text-sm font-semibold"
+                            className="truncate text-left text-sm font-semibold hover:underline"
                           >
                             {s.title}
                           </button>
@@ -1302,21 +1611,63 @@ export default function App() {
                 action={<button onClick={() => { setShowCanvas(true); setPanel("canvas"); }} className={`text-[11px] ${currentTheme.muted}`}>Open</button>}
               />
               <div className="grid grid-cols-2 gap-2">
-              <button onClick={exportSession} className={`rounded-2xl border px-3 py-3 text-sm font-semibold ${currentTheme.chip}`}>
-                Export JSON
-              </button>
-              <button onClick={exportSessionMarkdown} className={`rounded-2xl border px-3 py-3 text-sm font-semibold flex items-center justify-center gap-1 ${currentTheme.chip}`}>
-                <FileDown size={14} /> Export MD
-              </button>
-              <label className={`cursor-pointer rounded-2xl border px-3 py-3 text-sm font-semibold col-span-2 text-center ${currentTheme.chip}`}>
-                Import JSON
-                <input type="file" accept=".json" onChange={importSession} className="hidden" />
-              </label>
+                <button onClick={() => { setPanel("chat"); setDrawerOpen(false); }} className={`rounded-2xl border p-3 text-left ${currentTheme.chip}`}>
+                  <MessageSquare size={16} />
+                  <div className="mt-2 text-xs font-semibold">Chat</div>
+                </button>
+                <button onClick={() => { setShowCanvas(true); setPanel("canvas"); setDrawerOpen(false); }} className={`rounded-2xl border p-3 text-left ${currentTheme.chip}`}>
+                  <LayoutTemplate size={16} />
+                  <div className="mt-2 text-xs font-semibold">Canvas</div>
+                </button>
+                <button onClick={() => { setShowModels(true); setDrawerOpen(false); }} className={`rounded-2xl border p-3 text-left ${currentTheme.chip}`}>
+                  <BrainCircuit size={16} />
+                  <div className="mt-2 text-xs font-semibold">Models</div>
+                </button>
+                <button onClick={() => { setShowImageStudio(true); setDrawerOpen(false); }} className={`rounded-2xl border p-3 text-left ${currentTheme.chip}`}>
+                  <Wand2 size={16} />
+                  <div className="mt-2 text-xs font-semibold">Images</div>
+                </button>
+                <button onClick={() => { setShowSettings(true); setDrawerOpen(false); }} className={`rounded-2xl border p-3 text-left col-span-2 ${currentTheme.chip}`}>
+                  <Settings size={16} className="inline mr-2" />
+                  <span className="text-xs font-semibold">Settings</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <SectionTitle icon={Database} title="Memory" />
+              <div className="space-y-2">
+                {memoryFacts.slice(0, 4).map((fact, index) => (
+                  <div key={index} className={`rounded-2xl border p-3 text-sm ${currentTheme.panel2}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="pr-2">{fact}</div>
+                      <button onClick={() => removeMemoryFact(index)} className="text-red-400">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <SectionTitle icon={Download} title="Backups" />
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={exportSession} className={`rounded-2xl border px-3 py-3 text-xs font-semibold ${currentTheme.chip}`}>
+                  Export JSON
+                </button>
+                <button onClick={exportSessionMarkdown} className={`rounded-2xl border px-3 py-3 text-xs font-semibold flex items-center justify-center gap-1 ${currentTheme.chip}`}>
+                  <FileDown size={14} /> Export MD
+                </button>
+                <label className={`cursor-pointer rounded-2xl border px-3 py-3 text-xs font-semibold col-span-2 text-center ${currentTheme.chip}`}>
+                  Import JSON
+                  <input type="file" accept=".json" onChange={importSession} className="hidden" />
+                </label>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="border-t border-white/10 p-4">
+          <div className="border-t border-white/10 p-4">
             <div className="mb-3 flex items-center justify-between">
               <div className={`text-[11px] uppercase tracking-[0.3em] ${currentTheme.muted}`}>Focus</div>
               <button onClick={() => setTimerOn((v) => !v)} className={`text-xs ${currentTheme.accent}`}>
@@ -1355,6 +1706,9 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button onClick={() => setShowHelp(true)} className={`rounded-2xl border p-2 ${currentTheme.chip}`} title="Help Shortcuts">
+              <Info size={18} />
+            </button>
             <button onClick={() => setShowModels(true)} className={`hidden rounded-full border px-3 py-2 text-xs font-semibold md:inline-flex ${currentTheme.chip}`}>
               {selectedModel}
             </button>
@@ -1422,6 +1776,28 @@ export default function App() {
                               ))}
                             </div>
                           ) : null}
+
+                          {!isUser && msg.attributions && msg.attributions.length > 0 && (
+                            <div className="mt-4 pt-3 border-t border-white/10">
+                              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1">
+                                <Globe size={10} /> Grounded Sources
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {msg.attributions.map((att, attIdx) => (
+                                  <a
+                                    key={attIdx}
+                                    href={att.uri}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-300 hover:bg-white/10 transition-all hover:text-emerald-400"
+                                  >
+                                    <span className="truncate max-w-[150px]">{att.title || "Search source"}</span>
+                                    <ExternalLink size={10} />
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1444,7 +1820,7 @@ export default function App() {
             <div className={`border-t px-3 py-3 md:px-6 ${currentTheme.panel}`}>
               <div className="mx-auto max-w-4xl">
                 {promptChip ? (
-                  <div className="mb-3 flex flex-wrap gap-2">
+                  <div className="mb-3 flex flex-wrap gap-2 max-h-24 overflow-y-auto">
                     {QUICK_PROMPTS.map((p) => (
                       <button
                         key={p}
@@ -1463,26 +1839,27 @@ export default function App() {
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <ModelBadge label={selectedModel} onClick={() => setShowModels(true)} tone={currentTheme.chip} />
                   <button onClick={() => setLiveSearchMode((v) => !v)} className={`rounded-full border px-3 py-2 text-xs font-semibold ${liveSearchMode ? currentTheme.accentBg : currentTheme.chip}`}>
-                    <Globe size={14} className="inline" /> Web
+                    <Globe size={14} className="inline mr-1" /> Web Search
                   </button>
                   <button onClick={() => setShowImageStudio(true)} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
-                    <Wand2 size={14} className="inline" /> Images
+                    <Wand2 size={14} className="inline mr-1" /> Images
                   </button>
                   <button onClick={() => setShowCanvas(true)} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
-                    <LayoutTemplate size={14} className="inline" /> Canvas
+                    <LayoutTemplate size={14} className="inline mr-1" /> Canvas
                   </button>
                   <button onClick={() => setPromptChip((v) => !v ? "open" : "")} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
-                    <Grid3X3 size={14} className="inline" /> Prompts
+                    <Grid3X3 size={14} className="inline mr-1" /> Prompts
                   </button>
                 </div>
 
                 <div className={`flex items-end gap-2 rounded-[28px] border p-2 ${currentTheme.panel2}`}>
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className={`rounded-2xl border p-3 ${currentTheme.chip}`}
-                    title="Attach file"
+                    disabled={isParsingFile}
+                    className={`rounded-2xl border p-3 ${isParsingFile ? 'opacity-50 cursor-not-allowed' : currentTheme.chip}`}
+                    title="Attach file (PDF, TXT, CSV, HTML, Image)"
                   >
-                    <Paperclip size={18} />
+                    {isParsingFile ? <Loader2 size={18} className="animate-spin text-emerald-400" /> : <Paperclip size={18} />}
                   </button>
                   <button
                     onClick={() => imageInputRef.current?.click()}
@@ -1520,7 +1897,6 @@ export default function App() {
                     className="max-h-40 flex-1 resize-none bg-transparent px-2 py-3 text-sm outline-none"
                   />
 
-                  {/* Submit / Cancel Button Logic */}
                   {isTyping ? (
                     <button
                       onClick={stopGeneration}
@@ -1559,73 +1935,80 @@ export default function App() {
         )}
 
         {panel === "canvas" && showCanvas && (
-      <section className={`flex flex-col ${canvasFullscreen ? "fixed inset-0 z-50 bg-black/90 p-2 md:p-6" : "min-h-0 flex-1"}`}>
-        <div className={`flex-1 overflow-hidden ${canvasFullscreen ? "" : "p-3 md:p-4"}`}>
-          <div className="mx-auto grid h-full max-w-7xl grid-cols-1 gap-3 lg:grid-cols-2">
-            <div className={`rounded-3xl border p-3 flex flex-col ${currentTheme.panel}`}>
-              <div className="mb-3 flex items-center justify-between">
-                <SectionTitle icon={LayoutTemplate} title="Canvas" />
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setCanvasFullscreen(!canvasFullscreen)} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip} hover:text-white`}>
-                    <Maximize size={14} /> {canvasFullscreen ? "Exit" : "Expand"}
-                  </button>
-                  <button onClick={() => setCanvasTabs((prev) => [...prev, { id: uid("tab"), name: `Tab ${prev.length + 1}`, html: "", css: "", js: "" }])} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
-                    <Plus size={14} /> Tab
-                  </button>
-                  <button onClick={() => { setPanel("chat"); setCanvasFullscreen(false); }} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
-                    <MessageSquare size={14} /> Back
-                  </button>
-                </div>
-              </div>
+          <section className={`flex flex-col ${canvasFullscreen ? "fixed inset-0 z-50 bg-black/90 p-2 md:p-6" : "min-h-0 flex-1"}`}>
+            <div className={`flex-1 overflow-hidden ${canvasFullscreen ? "" : "p-3 md:p-4"}`}>
+              <div className="mx-auto grid h-full max-w-7xl grid-cols-1 gap-3 lg:grid-cols-2">
+                <div className={`rounded-3xl border p-3 flex flex-col ${currentTheme.panel}`}>
+                  <div className="mb-3 flex items-center justify-between">
+                    <SectionTitle icon={LayoutTemplate} title="Canvas Workspace" />
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setCanvasFullscreen(!canvasFullscreen)} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip} hover:text-white`}>
+                        <Maximize size={14} /> {canvasFullscreen ? "Exit" : "Expand"}
+                      </button>
+                      <button onClick={() => setCanvasTabs((prev) => [...prev, { id: uid("tab"), name: `Tab ${prev.length + 1}`, html: "", css: "", js: "" }])} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
+                        <Plus size={14} /> Tab
+                      </button>
+                      <button onClick={() => { setPanel("chat"); setCanvasFullscreen(false); }} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
+                        <MessageSquare size={14} /> Back
+                      </button>
+                    </div>
+                  </div>
 
-              <div className="mb-3 flex flex-wrap gap-2">
-                {canvasTabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveCanvasTab(tab.id)}
-                    className={`rounded-full border px-3 py-2 text-xs font-semibold ${tab.id === activeCanvasTab ? currentTheme.accentBg : currentTheme.chip}`}
-                  >
-                    {tab.name}
-                  </button>
-                ))}
-                <button onClick={cloneActiveCanvas} title="Clone active tab" className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip} hover:text-white`}>
-                  <CopyPlus size={14} className="inline" /> Clone
-                </button>
-              </div>
+                  <div className="mb-3 flex flex-wrap gap-2 items-center max-h-16 overflow-y-auto">
+                    {canvasTabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveCanvasTab(tab.id)}
+                        className={`rounded-full border px-3 py-2 text-xs font-semibold ${tab.id === activeCanvasTab ? currentTheme.accentBg : currentTheme.chip}`}
+                      >
+                        {tab.name}
+                      </button>
+                    ))}
+                    <button onClick={cloneActiveCanvas} title="Clone active tab" className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip} hover:text-white`}>
+                      Clone Active Tab
+                    </button>
+                    <div className="h-4 w-[1px] bg-white/20 mx-1" />
+                    <button onClick={() => loadTemplateToCanvas("counter")} className="text-[10px] rounded-lg bg-blue-500/10 border border-blue-500/20 px-2 py-1 text-blue-400 hover:bg-blue-500/20">
+                      + Counter
+                    </button>
+                    <button onClick={() => loadTemplateToCanvas("clock")} className="text-[10px] rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 text-emerald-400 hover:bg-emerald-500/20">
+                      + Clock
+                    </button>
+                  </div>
 
-              <div className="space-y-3 flex-1 flex flex-col min-h-0">
-                <textarea
-                  value={activeCanvas?.html || ""}
-                  onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, html: e.target.value } : t))}
-                  onKeyDown={(e) => handleCodeKeyDown(e, null, 'html')}
-                  placeholder="HTML"
-                  className={`w-full flex-1 font-mono rounded-2xl border p-3 text-sm outline-none resize-none ${currentTheme.panel2}`}
-                />
-                <textarea
-                  value={activeCanvas?.css || ""}
-                  onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, css: e.target.value } : t))}
-                  onKeyDown={(e) => handleCodeKeyDown(e, null, 'css')}
-                  placeholder="CSS"
-                  className={`w-full flex-1 font-mono rounded-2xl border p-3 text-sm outline-none resize-none ${currentTheme.panel2}`}
-                />
-                <textarea
-                  value={activeCanvas?.js || ""}
-                  onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, js: e.target.value } : t))}
-                  onKeyDown={(e) => handleCodeKeyDown(e, null, 'js')}
-                  placeholder="JS"
-                  className={`w-full flex-1 font-mono rounded-2xl border p-3 text-sm outline-none resize-none ${currentTheme.panel2}`}
-                />
-              </div>
+                  <div className="space-y-3 flex-1 flex flex-col min-h-0">
+                    <textarea
+                      value={activeCanvas?.html || ""}
+                      onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, html: e.target.value } : t))}
+                      onKeyDown={(e) => handleCodeKeyDown(e, null, 'html')}
+                      placeholder="HTML code..."
+                      className={`w-full flex-1 font-mono rounded-2xl border p-3 text-sm outline-none resize-none ${currentTheme.panel2}`}
+                    />
+                    <textarea
+                      value={activeCanvas?.css || ""}
+                      onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, css: e.target.value } : t))}
+                      onKeyDown={(e) => handleCodeKeyDown(e, null, 'css')}
+                      placeholder="CSS stylesheet..."
+                      className={`w-full flex-1 font-mono rounded-2xl border p-3 text-sm outline-none resize-none ${currentTheme.panel2}`}
+                    />
+                    <textarea
+                      value={activeCanvas?.js || ""}
+                      onChange={(e) => setCanvasTabs((prev) => prev.map((t) => t.id === activeCanvasTab ? { ...t, js: e.target.value } : t))}
+                      onKeyDown={(e) => handleCodeKeyDown(e, null, 'js')}
+                      placeholder="JavaScript script..."
+                      className={`w-full flex-1 font-mono rounded-2xl border p-3 text-sm outline-none resize-none ${currentTheme.panel2}`}
+                    />
+                  </div>
 
-              <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     <button onClick={() => updateSession(currentSession.id, (s) => s)} className={`rounded-full border px-4 py-2 text-xs font-semibold ${currentTheme.chip}`}>
-                      Save
+                      Save Code
                     </button>
                     <button onClick={() => window.open(URL.createObjectURL(new Blob([runCanvasTab()], { type: "text/html" })), "_blank")} className={`rounded-full border px-4 py-2 text-xs font-semibold ${currentTheme.chip}`}>
-                      <Play size={14} className="inline" /> Run
+                      <Play size={14} className="inline mr-1" /> Launch tab
                     </button>
                     <button onClick={downloadCanvasHtml} className={`rounded-full border px-4 py-2 text-xs font-semibold ${currentTheme.chip} hover:text-emerald-400`}>
-                      <DownloadCloud size={14} className="inline" /> Export HTML
+                      <DownloadCloud size={14} className="inline mr-1" /> Download Webpage
                     </button>
                     <button onClick={() => setShowCanvas(false)} className={`rounded-full border px-4 py-2 text-xs font-semibold ${currentTheme.chip}`}>
                       Close
@@ -1633,9 +2016,9 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className={`rounded-3xl border p-3 ${currentTheme.panel}`}>
-                  <SectionTitle icon={MonitorPlay} title="Preview" />
-                  <iframe title="Canvas Preview" srcDoc={runCanvasTab()} className="h-[70vh] w-full rounded-2xl border border-white/10 bg-white" />
+                <div className={`rounded-3xl border p-3 flex flex-col ${currentTheme.panel}`}>
+                  <SectionTitle icon={MonitorPlay} title="Live Preview Output" />
+                  <iframe title="Canvas Preview" srcDoc={runCanvasTab()} className="flex-1 w-full rounded-2xl border border-white/10 bg-white" />
                 </div>
               </div>
             </div>
@@ -1744,7 +2127,7 @@ export default function App() {
                     ))}
                   </div>
                   <div className="mt-4 rounded-2xl border p-3 text-sm">
-                    <div className="font-semibold">Active</div>
+                    <div className="font-semibold">Active Settings</div>
                     <div className={`mt-1 text-xs ${currentTheme.muted}`}>Text: {selectedModel}</div>
                     <div className={`mt-1 text-xs ${currentTheme.muted}`}>Image: {selectedImageModel}</div>
                     <div className={`mt-1 text-xs ${currentTheme.muted}`}>Tone: {tone}</div>
@@ -1776,8 +2159,8 @@ export default function App() {
               <div className="grid gap-4 p-4 lg:grid-cols-2 overflow-y-auto">
                 <div className={`space-y-4 rounded-3xl border p-4 ${currentTheme.panel2}`}>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => setImagePrompt((v) => v || "A cinematic futuristic AI workspace")} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
-                      Quick prompt
+                    <button onClick={() => setImagePrompt("A high resolution digital design of an underwater eco-dome")} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
+                      Quick design
                     </button>
                     <button onClick={() => imageInputRef.current?.click()} className={`rounded-full border px-3 py-2 text-xs font-semibold ${currentTheme.chip}`}>
                       Upload source image
@@ -1785,7 +2168,7 @@ export default function App() {
                   </div>
 
                   <div>
-                    <div className="mb-2 text-xs font-bold uppercase tracking-[0.25em] text-slate-400">Generate</div>
+                    <div className="mb-2 text-xs font-bold uppercase tracking-[0.25em] text-slate-400">Generate New Image</div>
                     <textarea
                       value={imagePrompt}
                       onChange={(e) => setImagePrompt(e.target.value)}
@@ -1793,7 +2176,7 @@ export default function App() {
                       className={`w-full rounded-2xl border p-3 text-sm outline-none ${currentTheme.panel}`}
                       placeholder="Describe the image you want..."
                     />
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <div className="mt-2 flex flex-wrap gap-2 max-h-24 overflow-y-auto">
                       {imageModelSource.slice(0, 6).map((m) => (
                         <button
                           key={m.slug}
@@ -1809,18 +2192,18 @@ export default function App() {
                       disabled={imageBusy}
                       className={`mt-3 rounded-2xl px-4 py-3 text-sm font-bold ${currentTheme.accentBg}`}
                     >
-                      <Wand2 size={16} className="inline" /> {imageBusy ? "Working..." : "Generate"}
+                      <Wand2 size={16} className="inline mr-2 animate-pulse" /> {imageBusy ? "Designing..." : "Generate Artwork"}
                     </button>
                   </div>
 
                   <div className="border-t border-white/10 pt-4">
-                    <div className="mb-2 text-xs font-bold uppercase tracking-[0.25em] text-slate-400">Edit</div>
+                    <div className="mb-2 text-xs font-bold uppercase tracking-[0.25em] text-slate-400">Image Edit & Sketch Manipulation</div>
                     <textarea
                       value={imageEditPrompt}
                       onChange={(e) => setImageEditPrompt(e.target.value)}
                       rows={4}
                       className={`w-full rounded-2xl border p-3 text-sm outline-none ${currentTheme.panel}`}
-                      placeholder="Tell the model how to edit the source image..."
+                      placeholder="Describe how to edit the source image..."
                     />
                     <div className="mt-2 flex items-center gap-2">
                       <button onClick={() => imageInputRef.current?.click()} className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${currentTheme.chip}`}>
@@ -1831,20 +2214,20 @@ export default function App() {
                         disabled={imageBusy}
                         className={`rounded-2xl px-4 py-3 text-sm font-bold ${currentTheme.accentBg}`}
                       >
-                        <ImageIcon size={16} className="inline" /> {imageBusy ? "Working..." : "Edit"}
+                        <ImageIcon size={16} className="inline mr-2" /> {imageBusy ? "Processing..." : "Edit Image"}
                       </button>
                     </div>
                   </div>
                 </div>
 
                 <div className={`rounded-3xl border p-4 ${currentTheme.panel2}`}>
-                  <SectionTitle icon={ImageIcon} title="Preview" />
+                  <SectionTitle icon={ImageIcon} title="Preview Canvas Output" />
                   {imageSource ? (
-                    <img src={imageSource} alt="Source" className="mb-3 max-h-60 w-full rounded-2xl border border-white/10 object-contain" />
+                    <img src={imageSource} alt="Source" className="mb-3 max-h-60 w-full rounded-2xl border border-white/10 object-contain animate-fade-in" />
                   ) : null}
                   {imageResult ? (
                     <div className="relative group">
-                      <img src={imageResult} alt="Result" className="max-h-[52vh] w-full rounded-2xl border border-white/10 object-contain" />
+                      <img src={imageResult} alt="Result" className="max-h-[52vh] w-full rounded-2xl border border-white/10 object-contain animate-fade-in" />
                       <button 
                         onClick={downloadResultImage} 
                         className="absolute bottom-4 right-4 rounded-xl p-3 bg-black/60 backdrop-blur-md border border-white/20 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/80 shadow-lg"
@@ -1857,8 +2240,8 @@ export default function App() {
                     <div className={`grid min-h-[45vh] place-items-center rounded-2xl border border-dashed text-center ${currentTheme.muted}`}>
                       <div>
                         <ImageIcon size={42} className="mx-auto mb-3 opacity-70" />
-                        <div className="text-sm font-semibold">No image yet</div>
-                        <div className="mt-1 text-xs">Generate something amazing or edit an upload.</div>
+                        <div className="text-sm font-semibold">Image Preview</div>
+                        <div className="mt-1 text-xs">Generate custom creations. Fallbacks run seamlessly.</div>
                       </div>
                     </div>
                   )}
@@ -1888,34 +2271,34 @@ export default function App() {
 
               <div className="grid gap-4 p-4 md:grid-cols-2 overflow-y-auto">
                 <div className={`space-y-4 rounded-3xl border p-4 ${currentTheme.panel2}`}>
-                  <SectionTitle icon={Settings} title="App" />
+                  <SectionTitle icon={Settings} title="App Customization" />
                   <div className="space-y-3">
-                    <label className="block text-sm font-semibold">Theme</label>
+                    <label className="block text-sm font-semibold">Workspace Theme</label>
                     <select value={theme} onChange={(e) => setTheme(e.target.value)} className={`w-full rounded-2xl border px-4 py-3 ${currentTheme.panel}`}>
                       <option value="cyber">Cyber</option>
                       <option value="light">Light</option>
                       <option value="neon">Neon</option>
                     </select>
 
-                    <label className="block text-sm font-semibold">Tone</label>
+                    <label className="block text-sm font-semibold">Default Assist Tone</label>
                     <select value={tone} onChange={(e) => setTone(e.target.value)} className={`w-full rounded-2xl border px-4 py-3 ${currentTheme.panel}`}>
                       {SYSTEM_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                     </select>
 
-                    <label className="block text-sm font-semibold">Default text model</label>
+                    <label className="block text-sm font-semibold">Default LLM Text Model</label>
                     <input
                       value={selectedModel}
                       onChange={(e) => setSelectedModel(e.target.value)}
                       className={`w-full rounded-2xl border px-4 py-3 text-sm ${currentTheme.panel}`}
-                      placeholder="openrouter/auto"
+                      placeholder="google/gemini-2.5-flash"
                     />
 
-                    <label className="block text-sm font-semibold">Default image model</label>
+                    <label className="block text-sm font-semibold">Default Creative Image Model</label>
                     <input
                       value={selectedImageModel}
                       onChange={(e) => setSelectedImageModel(e.target.value)}
                       className={`w-full rounded-2xl border px-4 py-3 text-sm ${currentTheme.panel}`}
-                      placeholder="openai/gpt-5-image"
+                      placeholder="google/gemini-2.5-flash-image"
                     />
 
                     <div className="flex items-center justify-between rounded-2xl border p-3">
@@ -1951,7 +2334,7 @@ export default function App() {
                 </div>
 
                 <div className={`space-y-4 rounded-3xl border p-4 ${currentTheme.panel2}`}>
-                  <SectionTitle icon={Database} title="Keys and Memory" />
+                  <SectionTitle icon={Database} title="Keys and Assistant Memory" />
                   <div className="space-y-3">
                     <div>
                       <label className="mb-1 block text-sm font-semibold">OpenRouter API key</label>
@@ -1987,20 +2370,20 @@ export default function App() {
                     </div>
 
                     <div className="rounded-2xl border p-3">
-                      <div className="mb-2 text-sm font-semibold">Memory facts</div>
+                      <div className="mb-2 text-sm font-semibold">Long-Term Memory base</div>
                       <div className="flex gap-2">
                         <input
                           value={memoryInput}
                           onChange={(e) => setMemoryInput(e.target.value)}
                           onKeyDown={(e) => e.key === "Enter" && addMemoryFact()}
                           className={`min-w-0 flex-1 rounded-2xl border px-4 py-3 text-sm ${currentTheme.panel}`}
-                          placeholder="Add a long-term fact..."
+                          placeholder="Add factual background context..."
                         />
                         <button onClick={addMemoryFact} className={`rounded-2xl px-4 py-3 text-sm font-bold ${currentTheme.accentBg}`}>
                           Add
                         </button>
                       </div>
-                      <div className="mt-3 space-y-2">
+                      <div className="mt-3 space-y-2 max-h-36 overflow-y-auto">
                         {memoryFacts.map((fact, idx) => (
                           <div key={idx} className="flex items-start justify-between gap-2 rounded-2xl border p-3 text-sm">
                             <div className="pr-2">{fact}</div>
@@ -2013,14 +2396,51 @@ export default function App() {
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
-                      <button onClick={() => setSessions([])} className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${currentTheme.chip}`}>
+                      <button onClick={() => { setSessions([]); showToast("Cleared chats", "info"); }} className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${currentTheme.chip}`}>
                         Clear chats
                       </button>
-                      <button onClick={() => setMemoryFacts([])} className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${currentTheme.chip}`}>
+                      <button onClick={() => { setMemoryFacts([]); showToast("Cleared memory", "info"); }} className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${currentTheme.chip}`}>
                         Clear memory
                       </button>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showHelp && (
+          <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-3 md:items-center" onClick={() => setShowHelp(false)}>
+            <div
+              className={`max-h-[85vh] w-full max-w-xl flex flex-col overflow-hidden rounded-[28px] border p-5 ${currentTheme.panel}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-white/10 pb-3 shrink-0">
+                <div className="flex items-center gap-2 font-black">
+                  <Sparkles size={16} className={currentTheme.accent} />
+                  <span>Shortcut Help Center</span>
+                </div>
+                <button onClick={() => setShowHelp(false)} className={`rounded-2xl border p-2 ${currentTheme.chip}`}>
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto py-4 space-y-3 text-sm">
+                <div className="flex items-center justify-between border-b border-white/5 py-1.5">
+                  <span className="font-semibold text-slate-300">Open Model Search</span>
+                  <kbd className="rounded bg-white/10 px-2 py-0.5 text-xs font-mono">Ctrl / ⌘ + K</kbd>
+                </div>
+                <div className="flex items-center justify-between border-b border-white/5 py-1.5">
+                  <span className="font-semibold text-slate-300">Open Keyboard Help</span>
+                  <kbd className="rounded bg-white/10 px-2 py-0.5 text-xs font-mono">?</kbd>
+                </div>
+                <div className="flex items-center justify-between border-b border-white/5 py-1.5">
+                  <span className="font-semibold text-slate-300">Insert Spaces in Code Editor</span>
+                  <kbd className="rounded bg-white/10 px-2 py-0.5 text-xs font-mono">Tab</kbd>
+                </div>
+                <div className="flex items-center justify-between border-b border-white/5 py-1.5">
+                  <span className="font-semibold text-slate-300">Close Modals or Drawers</span>
+                  <kbd className="rounded bg-white/10 px-2 py-0.5 text-xs font-mono">Esc</kbd>
                 </div>
               </div>
             </div>
